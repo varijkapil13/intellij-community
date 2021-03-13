@@ -53,7 +53,7 @@ public class PyPIPackageUtil {
    * @see #getPackageVersionsFromAdditionalRepositories(String)
    */
   private final LoadingCache<String, List<String>> myAdditionalPackagesReleases = CacheBuilder.newBuilder().build(
-    new CacheLoader<String, List<String>>() {
+    new CacheLoader<>() {
       @Override
       public List<String> load(@NotNull String key) throws Exception {
         LOG.debug("Searching for versions of package '" + key + "' in additional repositories");
@@ -81,7 +81,7 @@ public class PyPIPackageUtil {
    * Contains cached packages taken from additional repositories.
    */
   protected final LoadingCache<String, List<RepoPackage>> myAdditionalPackages = CacheBuilder.newBuilder().build(
-    new CacheLoader<String, List<RepoPackage>>() {
+    new CacheLoader<>() {
       @Override
       public List<RepoPackage> load(@NotNull String key) throws Exception {
         return getPackagesFromAdditionalRepository(key);
@@ -94,7 +94,7 @@ public class PyPIPackageUtil {
    * @see #refreshAndGetPackageDetailsFromPyPI(String, boolean)
    */
   private final LoadingCache<String, PackageDetails> myPackageToDetails = CacheBuilder.newBuilder().build(
-    new CacheLoader<String, PackageDetails>() {
+    new CacheLoader<>() {
       @Override
       public PackageDetails load(@NotNull String key) throws Exception {
         LOG.debug("Fetching details for the package '" + key + "' on PyPI");
@@ -319,7 +319,7 @@ public class PyPIPackageUtil {
 
   @NotNull
   private static List<String> parsePyPIListFromWeb(@NotNull String url) throws IOException {
-    LOG.debug("Fetching index of all packages available on " + url);
+    LOG.info("Fetching index of all packages available on " + url);
     return HttpRequests.request(url).userAgent(getUserAgent()).connect(request -> {
       final List<String> packages = new ArrayList<>();
       final Reader reader = request.getReader();
@@ -383,7 +383,12 @@ public class PyPIPackageUtil {
       private String homePage = "";
       @SerializedName("summary")
       private String summary = "";
-
+      @SerializedName("description")
+      private String description = "";
+      @SerializedName("description_content_type")
+      private String descriptionContentType = "";
+      @SerializedName("project_urls")
+      private Map<String, String>  projectUrls = Collections.emptyMap();
 
       @NotNull
       public String getVersion() {
@@ -408,6 +413,21 @@ public class PyPIPackageUtil {
       @NotNull
       public String getSummary() {
         return StringUtil.notNullize(summary);
+      }
+
+      @NotNull
+      public String getDescription() {
+        return StringUtil.notNullize(description);
+      }
+
+      @NotNull
+      public String getDescriptionContentType() {
+        return StringUtil.notNullize(descriptionContentType);
+      }
+
+      @NotNull
+      public Map<String, String> getProjectUrls() {
+        return ContainerUtil.notNullize(projectUrls);
       }
     }
 

@@ -15,25 +15,27 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiPlainTextFile;
 import com.intellij.sh.parser.ShShebangParserUtil;
-import com.intellij.util.containers.ContainerUtil;
+import com.intellij.testFramework.LightVirtualFile;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Set;
 
 @Service
 public final class ShShebangFileTypeDetector implements DocumentListener, Disposable {
-  private static final Set<String> KNOWN_SHELLS = ContainerUtil.set("sh", "zsh", "bash");
+  private static final Set<@NlsSafe String> KNOWN_SHELLS = Set.of("sh", "zsh", "bash"); //NON-NLS
 
   @Override
   public void documentChanged(@NotNull DocumentEvent event) {
     Document document = event.getDocument();
     VirtualFile virtualFile = FileDocumentManager.getInstance().getFile(document);
+    if (virtualFile instanceof LightVirtualFile) return;
     Project project = ProjectUtil.guessProjectForFile(virtualFile);
     if (project == null) return;
     PsiDocumentManager psiDocumentManager = PsiDocumentManager.getInstance(project);

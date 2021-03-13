@@ -18,6 +18,7 @@ package com.intellij.openapi.externalSystem.service.project;
 import com.intellij.facet.FacetManager;
 import com.intellij.facet.ModifiableFacetModel;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.externalSystem.model.project.ModuleData;
 import com.intellij.openapi.module.ModifiableModuleModel;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -32,14 +33,13 @@ import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
 import com.intellij.workspaceModel.ide.WorkspaceModel;
 import com.intellij.workspaceModel.ide.impl.legacyBridge.facet.FacetManagerBridge;
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LibraryBridge;
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleManagerComponentBridge;
-import com.intellij.workspaceModel.ide.legacyBridge.ModifiableRootModelBridge;
 import com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots.ModuleRootComponentBridge;
 import com.intellij.workspaceModel.ide.legacyBridge.*;
-import com.intellij.workspaceModel.storage.WorkspaceEntity;
 import com.intellij.workspaceModel.storage.WorkspaceEntityStorage;
 import com.intellij.workspaceModel.storage.WorkspaceEntityStorageBuilder;
 import org.jetbrains.annotations.NotNull;
@@ -49,7 +49,9 @@ import java.util.Collection;
 import java.util.Map;
 
 public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModelsProvider {
+  public static final Key<IdeModifiableModelsProviderImpl> MODIFIABLE_MODELS_PROVIDER_KEY = Key.create("IdeModelsProvider");
   private LibraryTable.ModifiableModel myLibrariesModel;
+  private WorkspaceEntityStorage initialStorage;
   private WorkspaceEntityStorageBuilder diff;
 
   public IdeModifiableModelsProviderImpl(Project project) {
@@ -72,7 +74,12 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
     return ReadAction.compute(() -> {
       ModuleManager moduleManager = ModuleManager.getInstance(myProject);
       if (WorkspaceModel.isEnabled()) {
-        return ((ModuleManagerComponentBridge)moduleManager).getModifiableModel(getActualStorageBuilder());
+        ModifiableModuleModel modifiableModel = ((ModuleManagerComponentBridge)moduleManager).getModifiableModel(getActualStorageBuilder());
+        Module[] modules = modifiableModel.getModules();
+        for (Module module : modules) {
+          setIdeModelsProviderForModule(module);
+        }
+        return modifiableModel;
       }
       return moduleManager.getModifiableModel();
     });
@@ -86,7 +93,7 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
       @Override
       public Library getLibrary(Library library, String libraryName, String libraryLevel) {
         if (LibraryTablesRegistrar.PROJECT_LEVEL.equals(libraryLevel)) {
-          return myLibrariesModel.getLibraryByName(libraryName);
+          return getModifiableProjectLibrariesModel().getLibraryByName(libraryName);
         }
         return library;
       }
@@ -95,7 +102,7 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
     return ReadAction.compute(() -> {
       ModuleRootManagerEx rootManager = ModuleRootManagerEx.getInstanceEx(module);
       if (WorkspaceModel.isEnabled()) {
-        return ((ModuleRootComponentBridge)rootManager).getModifiableModel(getActualStorageBuilder(), rootConfigurationAccessor);
+        return ((ModuleRootComponentBridge)rootManager).getModifiableModel(getActualStorageBuilder(), initialStorage, rootConfigurationAccessor);
       }
       return rootManager.getModifiableModel(rootConfigurationAccessor);
     });
@@ -116,6 +123,20 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
       return ((LibraryBridge)library).getModifiableModel(getActualStorageBuilder());
     }
     return library.getModifiableModel();
+  }
+
+  @Override
+  public @NotNull Module newModule(@NotNull String filePath, String moduleTypeId) {
+    Module module = super.newModule(filePath, moduleTypeId);
+    setIdeModelsProviderForModule(module);
+    return module;
+  }
+
+  @Override
+  public @NotNull Module newModule(@NotNull ModuleData moduleData) {
+    Module module = super.newModule(moduleData);
+    setIdeModelsProviderForModule(module);
+    return module;
   }
 
   @Override
@@ -151,7 +172,13 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
       for (ModifiableRootModel model: rootModels1) {
         assert !model.isDisposed() : "Already disposed: " + model;
       }
-      if (myModifiableModuleModel != null) ((ModifiableModuleModelBridge)myModifiableModuleModel).prepareForCommit();
+      if (myModifiableModuleModel != null) {
+        Module[] modules = myModifiableModuleModel.getModules();
+        for (Module module : modules) {
+          module.putUserData(MODIFIABLE_MODELS_PROVIDER_KEY, null);
+        }
+        ((ModifiableModuleModelBridge)myModifiableModuleModel).prepareForCommit();
+      }
       for (ModifiableRootModel model : rootModels1) {
         ((ModifiableRootModelBridge)model).prepareForCommit();
       }
@@ -166,19 +193,36 @@ public class IdeModifiableModelsProviderImpl extends AbstractIdeModifiableModels
         }
       }
       myModifiableModels.values().forEach(ModifiableModel::commit);
-      Map<WorkspaceEntity, WorkspaceEntity> res = WorkspaceModel.getInstance(myProject).updateProjectModel(builder -> builder.addDiff(getActualStorageBuilder()));
-      for (Map.Entry<Module, ModifiableFacetModel> each: myModifiableFacetModels.entrySet()) {
-        if (!each.getKey().isDisposed()) {
-          ((ModifiableFacetModelBridge)each.getValue()).populateFacetManager(res);
-        }
+      WorkspaceModel.getInstance(myProject).updateProjectModel(builder -> {
+        builder.addDiff(getActualStorageBuilder());
+        return null;
+      });
+
+      for (ModifiableRootModel model : rootModels1) {
+        ((ModifiableRootModelBridge)model).postCommit();
       }
     });
     myUserData.clear();
   }
 
-  private WorkspaceEntityStorageBuilder getActualStorageBuilder() {
+  @Override
+  public void dispose() {
+    if (WorkspaceModel.isEnabled() && myModifiableModuleModel != null) {
+      Module[] modules = myModifiableModuleModel.getModules();
+      for (Module module : modules) {
+        module.putUserData(MODIFIABLE_MODELS_PROVIDER_KEY, null);
+      }
+    }
+    super.dispose();
+  }
+
+  public WorkspaceEntityStorageBuilder getActualStorageBuilder() {
     if (diff != null) return diff;
-    WorkspaceEntityStorage entityStorage = WorkspaceModel.getInstance(myProject).getEntityStorage().getCurrent();
-    return diff = WorkspaceEntityStorageBuilder.Companion.from(entityStorage);
+    initialStorage = WorkspaceModel.getInstance(myProject).getEntityStorage().getCurrent();
+    return diff = WorkspaceEntityStorageBuilder.from(initialStorage);
+  }
+
+  private void setIdeModelsProviderForModule(@NotNull Module module) {
+    if (WorkspaceModel.isEnabled()) module.putUserData(MODIFIABLE_MODELS_PROVIDER_KEY, this);
   }
 }

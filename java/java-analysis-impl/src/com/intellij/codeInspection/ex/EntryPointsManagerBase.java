@@ -2,6 +2,7 @@
 package com.intellij.codeInspection.ex;
 
 import com.intellij.codeInsight.AnnotationUtil;
+import com.intellij.codeInsight.MetaAnnotationUtil;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.intention.IntentionAction;
@@ -409,12 +410,12 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
     return myAddNonJavaEntries;
   }
 
-  public void addAllPersistentEntries(EntryPointsManagerBase manager) {
+  public void addAllPersistentEntries(@NotNull EntryPointsManagerBase manager) {
     myPersistentEntryPoints.putAll(manager.myPersistentEntryPoints);
     myPatterns.addAll(manager.getPatterns());
   }
 
-  static void convert(Element element, final Map<? super String, ? super SmartRefElementPointer> persistentEntryPoints) {
+  static void convert(@NotNull Element element, final Map<? super String, ? super SmartRefElementPointer> persistentEntryPoints) {
     List<Element> content = element.getChildren();
     for (final Element entryElement : content) {
       if (ENTRY_POINT_ATTR.equals(entryElement.getName())) {
@@ -430,7 +431,7 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
           while (lastDotIdx > parenIndex) lastDotIdx = fqName.lastIndexOf('.', lastDotIdx - 1);
 
           boolean notype = false;
-          if (spaceIdx < 0 || spaceIdx + 1 > lastDotIdx || spaceIdx > parenIndex) {
+          if (spaceIdx < 0 || spaceIdx + 1 > lastDotIdx) {
             notype = true;
           }
 
@@ -506,9 +507,11 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
         }
       }
     }
-
+    final Collection<String> defaultAdditionalAnnotations = getAdditionalAnnotations();
     return AnnotationUtil.checkAnnotatedUsingPatterns(owner, ADDITIONAL_ANNOTATIONS) ||
-           AnnotationUtil.checkAnnotatedUsingPatterns(owner, getAdditionalAnnotations());
+           AnnotationUtil.checkAnnotatedUsingPatterns(owner, defaultAdditionalAnnotations) ||
+           MetaAnnotationUtil.isMetaAnnotated(owner, ADDITIONAL_ANNOTATIONS) ||
+           MetaAnnotationUtil.isMetaAnnotated(owner, defaultAdditionalAnnotations);
   }
 
   private static boolean isAcceptedByPattern(@NotNull PsiClass element, String qualifiedName, ClassPattern pattern, Set<? super PsiClass> visited) {
@@ -559,7 +562,7 @@ public abstract class EntryPointsManagerBase extends EntryPointsManager implemen
     private Pattern regexp;
     private Pattern methodRegexp;
 
-    public ClassPattern(ClassPattern classPattern) {
+    public ClassPattern(@NotNull ClassPattern classPattern) {
       hierarchically = classPattern.hierarchically;
       pattern = classPattern.pattern;
       method = classPattern.method;

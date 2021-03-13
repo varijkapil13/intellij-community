@@ -68,8 +68,6 @@ import java.awt.image.ColorModel;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.net.URL;
 
 /**
  * Image editor UI
@@ -100,10 +98,10 @@ final class ImageEditorUI extends JPanel implements DataProvider, CopyProvider, 
   private final boolean isEmbedded;
 
   ImageEditorUI(@Nullable ImageEditor editor) {
-    this(editor, false);
+    this(editor, false, true);
   }
 
-  ImageEditorUI(@Nullable ImageEditor editor, boolean isEmbedded) {
+  ImageEditorUI(@Nullable ImageEditor editor, boolean isEmbedded, boolean isOpaque) {
     this.editor = editor;
     this.isEmbedded = isEmbedded;
 
@@ -193,6 +191,13 @@ final class ImageEditorUI extends JPanel implements DataProvider, CopyProvider, 
         updateZoomFactor();
       }
     });
+
+    if (!isOpaque) {
+      setOpaque(false);
+      contentPanel.setOpaque(false);
+      myScrollPane.setOpaque(false);
+      myScrollPane.getViewport().setOpaque(false);
+    }
 
     updateInfo();
   }
@@ -379,7 +384,7 @@ final class ImageEditorUI extends JPanel implements DataProvider, CopyProvider, 
 
   private class ImageZoomModelImpl implements ImageZoomModel {
     private boolean myZoomLevelChanged;
-    private final NotNullValue<Double> IMAGE_MAX_ZOOM_FACTOR = new NotNullValue<Double>() {
+    private final NotNullValue<Double> IMAGE_MAX_ZOOM_FACTOR = new NotNullValue<>() {
       @NotNull
       @Override
       public Double initialize() {
@@ -388,11 +393,11 @@ final class ImageEditorUI extends JPanel implements DataProvider, CopyProvider, 
 
         if (IfsUtil.isSVG(file)) {
           try {
-            URL url = new File(file.getPath()).toURI().toURL();
-            return Math.max(1, SVGLoader.getMaxZoomFactor(url, new ByteArrayInputStream(file.contentsToByteArray()), ScaleContext.create(editor.getComponent())));
+            return Math.max(1, SVGLoader.getMaxZoomFactor(file.getPath(), new ByteArrayInputStream(file.contentsToByteArray()),
+                                                          ScaleContext.create(editor.getComponent())));
           }
           catch (Throwable t) {
-            Logger.getInstance("#org.intellij.images.editor.impl.ImageEditorUI").warn(t);
+            Logger.getInstance(ImageEditorUI.class).warn(t);
           }
         }
         return Double.MAX_VALUE;
@@ -609,7 +614,7 @@ final class ImageEditorUI extends JPanel implements DataProvider, CopyProvider, 
       PsiElement psi = findPsiFile();
       return psi != null ? new PsiElement[]{psi} : PsiElement.EMPTY_ARRAY;
     }
-    else if (PlatformDataKeys.COPY_PROVIDER.is(dataId) && copyPasteSupport != null) {
+    else if (PlatformDataKeys.COPY_PROVIDER.is(dataId)) {
       return this;
     }
     else if (PlatformDataKeys.CUT_PROVIDER.is(dataId) && copyPasteSupport != null) {

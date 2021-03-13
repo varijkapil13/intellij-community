@@ -18,7 +18,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.command.impl.StartMarkAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
@@ -64,7 +63,6 @@ import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
 import com.intellij.psi.impl.PsiDocumentManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
-import com.intellij.refactoring.rename.inplace.InplaceRefactoring;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.LocalTimeCounter;
 import com.intellij.util.ThrowableRunnable;
@@ -76,8 +74,6 @@ import com.intellij.workspaceModel.ide.impl.legacyBridge.LegacyBridgeProjectLife
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.junit.Rule;
-import org.junit.rules.TestRule;
 
 import javax.swing.*;
 import java.io.IOException;
@@ -86,7 +82,9 @@ import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 import static com.intellij.testFramework.RunAll.runAll;
@@ -108,7 +106,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   static {
     PlatformTestUtil.registerProjectCleanup(LightPlatformTestCase::closeAndDeleteProject);
   }
-
   private VirtualFilePointerTracker myVirtualFilePointerTracker;
   private CodeStyleSettingsTracker myCodeStyleSettingsTracker;
 
@@ -372,10 +369,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
         }
       },
       () -> {
-        StartMarkAction.checkCleared(project);
-        InplaceRefactoring.checkCleared();
-      },
-      () -> {
         if (project != null) {
           TestApplicationManagerKt.tearDownProjectAndApp(project);
         }
@@ -471,22 +464,19 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     runAll(
       () -> UIUtil.dispatchAllInvocationEvents(),
       () -> {
-        Application app = ApplicationManager.getApplication();
         // getAllEditors() should be called only after dispatchAllInvocationEvents(), that's why separate RunAll is used
-        EditorFactory editorFactory = app == null ? null : app.getServiceIfCreated(EditorFactory.class);
-        if (editorFactory == null) {
-          return;
+        Application app = ApplicationManager.getApplication();
+        if (app != null) {
+          EditorFactory editorFactory = app.getServiceIfCreated(EditorFactory.class);
+          if (editorFactory != null) {
+            List<ThrowableRunnable<?>> actions = new ArrayList<>();
+            for (Editor editor : editorFactory.getAllEditors()) {
+              actions.add(() -> EditorFactoryImpl.throwNotReleasedError(editor));
+              actions.add(() -> editorFactory.releaseEditor(editor));
+            }
+            new RunAll(actions).run();
+          }
         }
-
-        RunAll runAll = new RunAll();
-        for (Editor editor : editorFactory.getAllEditors()) {
-          runAll = runAll
-            .append(
-              () -> EditorFactoryImpl.throwNotReleasedError(editor),
-              () -> editorFactory.releaseEditor(editor)
-            );
-        }
-        runAll.run();
       });
   }
 

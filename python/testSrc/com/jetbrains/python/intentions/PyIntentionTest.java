@@ -77,19 +77,11 @@ public class PyIntentionTest extends PyTestCase {
    *
    * @param hint
    */
-  private void doNegativeTest(String hint) {
+  private void doNegativeTest(@NotNull String hint) {
     final PsiFile file = myFixture.configureByFile("intentions/" + getTestName(true) + ".py");
     List<IntentionAction> ints = myFixture.filterAvailableIntentions(hint);
-    assertEmpty(ints);
+    assertEmpty("Intention '" + hint + "' should not be available under caret", ints);
     assertSdkRootsNotParsed(file);
-  }
-
-  public void testConvertDictComp() {
-    doTest(PyPsiBundle.message("INTN.convert.dict.comp.to"), LanguageLevel.PYTHON26);
-  }
-
-  public void testConvertSetLiteral() {
-    doTest(PyPsiBundle.message("INTN.convert.set.literal.to"), LanguageLevel.PYTHON26);
   }
 
   public void testReplaceExceptPart() {
@@ -101,7 +93,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testRemoveLeadingF() {
-    doTest(PyPsiBundle.message("INTN.remove.leading.$0", "F"), LanguageLevel.PYTHON35);
+    doTest(PyPsiBundle.message("QFIX.remove.string.prefix", "F"), LanguageLevel.PYTHON35);
   }
 
   // PY-18972
@@ -125,26 +117,20 @@ public class PyIntentionTest extends PyTestCase {
     doTest(PyPsiBundle.message("INTN.replace.backquote.expression"), LanguageLevel.PYTHON34);
   }
 
-  /*
-  public void testReplaceMethod() {
-    doTest(PyBundle.message("INTN.replace.method"), LanguageLevel.PYTHON30);
-  }
-  */
-
   public void testSplitIf() {
-    doTest(PyPsiBundle.message("INTN.split.if.text"));
+    doTest(PyPsiBundle.message("INTN.split.if"));
   }
 
   public void testNegateComparison() {
-    doTest(PyPsiBundle.message("INTN.negate.$0.to.$1", "<=", ">"));
+    doTest(PyPsiBundle.message("INTN.negate.comparison", "<=", ">"));
   }
 
   public void testNegateComparison2() {
-    doTest(PyPsiBundle.message("INTN.negate.$0.to.$1", ">", "<="));
+    doTest(PyPsiBundle.message("INTN.negate.comparison", ">", "<="));
   }
 
   public void testFlipComparison() {
-    doTest(PyPsiBundle.message("INTN.flip.$0.to.$1", ">", "<"));
+    doTest(PyPsiBundle.message("INTN.flip.comparison.to.operator", ">", "<"));
   }
 
   public void testReplaceListComprehensionWithFor() {
@@ -156,19 +142,19 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testJoinIf() {
-    doTest(PyPsiBundle.message("INTN.join.if.text"));
+    doTest(PyPsiBundle.message("INTN.join.if"));
   }
 
   public void testJoinIfElse() {
-    doNegativeTest(PyPsiBundle.message("INTN.join.if.text"));
+    doNegativeTest(PyPsiBundle.message("INTN.join.if"));
   }
 
   public void testJoinIfBinary() {              //PY-4697
-    doTest(PyPsiBundle.message("INTN.join.if.text"));
+    doTest(PyPsiBundle.message("INTN.join.if"));
   }
 
   public void testJoinIfMultiStatements() {           //PY-2970
-    doNegativeTest(PyPsiBundle.message("INTN.join.if.text"));
+    doNegativeTest(PyPsiBundle.message("INTN.join.if"));
   }
 
   public void testDictConstructorToLiteralForm() {
@@ -210,6 +196,71 @@ public class PyIntentionTest extends PyTestCase {
   public void testMultilineQuotedString() { //PY-8064
     getIndentOptions().INDENT_SIZE = 2;
     doTest(PyPsiBundle.message("INTN.quoted.string.double.to.single"));
+  }
+
+  // PY-15608
+  public void testConvertingQuotesOfGluedStringWithDifferentElementQuotes() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingFStringQuotesNotSuggestedInsideInnerExpressions() {
+    doNegativeTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingFStringQuotesSuggestedOnFragmentBraces() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingFStringQuotesSuggestedOnFragmentFormatPart() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingRawFStringQuotes() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesNotSuggestedForStringInsideFStringWithOppositeQuotes() {
+    doNegativeTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesNotSuggestedForStringInsideFStringThatWouldRequireEscapingInsideFragment() {
+    doNegativeTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesNotSuggestedForFStringContainingStringWithInconvertibleQuotes() {
+    doNegativeTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesOfStringInsideFString() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.double.to.single"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesOfFStringContainingOtherStrings() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.double.to.single"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesOfFStringContainingEscapedQuotes() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-30798
+  public void testConvertingQuotesOfGluedFStringContainingOtherStrings() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
+  }
+
+  // PY-38315
+  public void testConvertingQuotesOfEmptyString() {
+    doTest(PyPsiBundle.message("INTN.quoted.string.single.to.double"));
   }
 
   public void testConvertLambdaToFunction() {
@@ -409,7 +460,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testTypeInDocstring6() {         //PY-7973
-    doNegativeTest(PyPsiBundle.message("INTN.specify.return.type"));
+    doNegativeTest(PyPsiBundle.message("INTN.specify.return.type.in.docstring"));
   }
 
   public void testTypeInDocstring7() {         //PY-8930
@@ -422,7 +473,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testParamTypeInDocstringNotSuggestedForSelf() {
-    doNegativeTest(PyPsiBundle.message("INTN.specify.type"));
+    doNegativeTest(PyPsiBundle.message("INTN.specify.type.in.docstring"));
   }
 
   public void testParamTypeInAnnotationNotSuggestedForSelf() {
@@ -430,7 +481,7 @@ public class PyIntentionTest extends PyTestCase {
   }
 
   public void testParamTypeInDocstringNotSuggestedForLambda() {
-    doNegativeTest(PyPsiBundle.message("INTN.specify.type"));
+    doNegativeTest(PyPsiBundle.message("INTN.specify.type.in.docstring"));
   }
 
   public void testParamTypeInAnnotationNotSuggestedForLambda() {
@@ -812,25 +863,25 @@ public class PyIntentionTest extends PyTestCase {
     TestDialogManager.setTestInputDialog(new TestInputDialog() {
       @Override
       public String show(String message) {
-        return "mc";
+        return "mc"; //NON-NLS
       }
     });
-    doMultiFileTest(PyPsiBundle.message("INTN.add.alias.for.import.$0", "MyClass"));
+    doMultiFileTest(PyPsiBundle.message("INTN.add.import.alias.to.name", "MyClass"));
   }
 
   private void doDocStubTest(@NotNull DocStringFormat format) {
     runWithDocStringFormat(format, () -> {
       CodeInsightSettings.getInstance().JAVADOC_STUB_ON_ENTER = true;
-      doTest(PyPsiBundle.message("INTN.doc.string.stub"), true);
+      doTest(PyPsiBundle.message("INTN.insert.docstring.stub"), true);
     });
   }
 
   private void doDocParamTypeTest(@NotNull DocStringFormat format) {
-    runWithDocStringFormat(format, () -> doTest(PyPsiBundle.message("INTN.specify.type")));
+    runWithDocStringFormat(format, () -> doTest(PyPsiBundle.message("INTN.specify.type.in.docstring")));
   }
 
   private void doDocReturnTypeTest(@NotNull DocStringFormat format) {
-    runWithDocStringFormat(format, () -> doTest(PyPsiBundle.message("INTN.specify.return.type")));
+    runWithDocStringFormat(format, () -> doTest(PyPsiBundle.message("INTN.specify.return.type.in.docstring")));
 
   }
 

@@ -65,7 +65,7 @@ public final class GitRepositoryImpl extends RepositoryImpl implements GitReposi
     if (!light) {
       myStagingAreaHolder = new GitStagingAreaHolder(this);
 
-      myUntrackedFilesHolder = new GitUntrackedFilesHolder(this, myRepositoryFiles);
+      myUntrackedFilesHolder = new GitUntrackedFilesHolder(this);
       Disposer.register(this, myUntrackedFilesHolder);
 
       myIgnoredRepositoryFilesHolder =
@@ -87,6 +87,7 @@ public final class GitRepositoryImpl extends RepositoryImpl implements GitReposi
    */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static GitRepository getInstance(@NotNull VirtualFile root,
                                           @NotNull Project project,
                                           boolean listenToRepoChanges) {

@@ -27,6 +27,7 @@ import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -43,7 +44,7 @@ import java.util.List;
 /**
  * @author anna
  */
-public abstract class AbstractRerunFailedTestsAction extends AnAction implements AnAction.TransparentUpdate {
+public abstract class AbstractRerunFailedTestsAction extends AnAction {
   private static final Logger LOG = Logger.getInstance(AbstractRerunFailedTestsAction.class);
 
   private TestFrameworkRunningModel myModel;
@@ -208,18 +209,9 @@ public abstract class AbstractRerunFailedTestsAction extends AnAction implements
     }
   }
 
-  /**
-   * @deprecated use {@link #getRunProfile(ExecutionEnvironment)}
-   */
-  @Deprecated
-  public MyRunProfile getRunProfile() {
-    return null;
-  }
-
   @Nullable
   protected MyRunProfile getRunProfile(@NotNull ExecutionEnvironment environment) {
-    //noinspection deprecation
-    return getRunProfile();
+    return null;
   }
 
   @Nullable
@@ -234,8 +226,10 @@ public abstract class AbstractRerunFailedTestsAction extends AnAction implements
   }
 
   protected static abstract class MyRunProfile extends RunConfigurationBase<Element> implements ModuleRunProfile,
-                                                                                                WrappingRunConfiguration<RunConfigurationBase<?>> {
+                                                                                                WrappingRunConfiguration<RunConfigurationBase<?>>,
+                                                                                                ConsolePropertiesProvider {
     @Deprecated
+    @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
     public RunConfigurationBase<?> getConfiguration() {
       return getPeer();
     }
@@ -253,6 +247,12 @@ public abstract class AbstractRerunFailedTestsAction extends AnAction implements
     }
 
     public void clear() {
+    }
+
+    @Override
+    public @Nullable TestConsoleProperties createTestConsoleProperties(@NotNull Executor executor) {
+      return myConfiguration instanceof ConsolePropertiesProvider ? 
+             ((ConsolePropertiesProvider)myConfiguration).createTestConsoleProperties(executor) : null;
     }
 
     ///////////////////////////////////Delegates

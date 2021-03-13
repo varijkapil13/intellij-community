@@ -1,9 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.startup.impl;
 
 import com.intellij.diagnostic.*;
 import com.intellij.diagnostic.StartUpMeasurer.Activities;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.lightEdit.LightEditCompatible;
 import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.plugins.cl.PluginClassLoader;
 import com.intellij.ide.startup.ServiceNotReadyException;
@@ -11,11 +12,9 @@ import com.intellij.ide.startup.StartupManagerEx;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.extensions.ExtensionNotApplicableException;
-import com.intellij.openapi.extensions.ExtensionPointListener;
-import com.intellij.openapi.extensions.PluginDescriptor;
-import com.intellij.openapi.extensions.PluginId;
+import com.intellij.openapi.extensions.*;
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl;
 import com.intellij.openapi.extensions.impl.ExtensionsAreaImpl;
 import com.intellij.openapi.progress.ProcessCanceledException;
@@ -31,6 +30,7 @@ import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.GuiUtils;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.ApiStatus;
@@ -39,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -49,9 +50,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-@SuppressWarnings("IncorrectParentDisposable")
 @ApiStatus.Internal
 public class StartupManagerImpl extends StartupManagerEx {
+  /**
+   * Acts as {@link StartupActivity#POST_STARTUP_ACTIVITY}, but executed with 5 seconds delay after project opening.
+   */
+  private static final ExtensionPointName<StartupActivity.Background>
+    BACKGROUND_POST_STARTUP_ACTIVITY = new ExtensionPointName<>("com.intellij.backgroundPostStartupActivity");
+
   private static final Logger LOG = Logger.getInstance(StartupManagerImpl.class);
   private static final long EDT_WARN_THRESHOLD_IN_NANO = TimeUnit.MILLISECONDS.toNanos(100);
 
@@ -162,6 +168,9 @@ public class StartupManagerImpl extends StartupManagerEx {
     }
   }
 
+  /*
+   * See https://github.com/JetBrains/intellij-community/blob/master/platform/service-container/overview.md#startup-activity
+   */
   private void runStartUpActivities(@Nullable ProgressIndicator indicator) {
     LOG.assertTrue(!myStartupActivitiesPassed);
 
@@ -258,7 +267,7 @@ public class StartupManagerImpl extends StartupManagerEx {
 
   @TestOnly
   public static void addActivityEpListener(@NotNull Project project) {
-    StartupActivity.POST_STARTUP_ACTIVITY.addExtensionPointListener(new ExtensionPointListener<StartupActivity>() {
+    StartupActivity.POST_STARTUP_ACTIVITY.addExtensionPointListener(new ExtensionPointListener<>() {
       @Override
       public void extensionAdded(@NotNull StartupActivity extension, @NotNull PluginDescriptor pluginDescriptor) {
         StartupManagerImpl startupManager = ((StartupManagerImpl)getInstance(project));
@@ -280,7 +289,7 @@ public class StartupManagerImpl extends StartupManagerEx {
     }, project);
   }
 
-  private static void dumbUnawarePostActivitiesPassed(@NotNull AtomicReference<Activity> edtActivity, int count) {
+  private static void dumbUnawarePostActivitiesPassed(@NotNull AtomicReference<? extends Activity> edtActivity, int count) {
     if (count != 0) {
       return;
     }
@@ -297,7 +306,7 @@ public class StartupManagerImpl extends StartupManagerEx {
     }
     long startTime = StartUpMeasurer.getCurrentTime();
     try {
-      extension.runActivity(myProject);
+      runStartupActivity(extension);
     }
     catch (ServiceNotReadyException e) {
       LOG.error(new Exception(e));
@@ -318,6 +327,12 @@ public class StartupManagerImpl extends StartupManagerEx {
     long duration = StartUpMeasurer.addCompletedActivity(startTime, extension.getClass(), ActivityCategory.POST_STARTUP_ACTIVITY, pluginId, StartUpMeasurer.MEASURE_THRESHOLD);
     if (uiFreezeWarned != null && duration > EDT_WARN_THRESHOLD_IN_NANO) {
       reportUiFreeze(uiFreezeWarned);
+    }
+  }
+
+  private void runStartupActivity(@NotNull StartupActivity activity) {
+    if (!(myProject instanceof LightEditCompatible) || activity instanceof LightEditCompatible) {
+      activity.runActivity(myProject);
     }
   }
 
@@ -405,28 +420,40 @@ public class StartupManagerImpl extends StartupManagerEx {
         return;
       }
 
-      List<StartupActivity.Background> activities = StartupActivity.BACKGROUND_POST_STARTUP_ACTIVITY.getExtensionList();
-      StartupActivity.BACKGROUND_POST_STARTUP_ACTIVITY.addExtensionPointListener(new ExtensionPointListener<StartupActivity.Background>() {
-        @Override
-        public void extensionAdded(@NotNull StartupActivity.Background extension, @NotNull PluginDescriptor pluginDescriptor) {
-          extension.runActivity(myProject);
-        }
-      }, myProject);
-
-      BackgroundTaskUtil.runUnderDisposeAwareIndicator(myProject, () -> {
-        for (StartupActivity activity : activities) {
-          ProgressManager.checkCanceled();
-
-          if (myProject.isDisposed()) {
-            return;
+      long startTimeNano = System.nanoTime();
+      List<StartupActivity.Background> activities = ReadAction.compute(() -> {
+        BACKGROUND_POST_STARTUP_ACTIVITY.addExtensionPointListener(new ExtensionPointListener<>() {
+          @Override
+          public void extensionAdded(@NotNull StartupActivity.Background extension, @NotNull PluginDescriptor pluginDescriptor) {
+            AppExecutorUtil.getAppScheduledExecutorService().execute(() -> {
+              runBackgroundPostStartupActivities(Collections.singletonList(extension));
+            });
           }
-
-          activity.runActivity(myProject);
-        }
+        }, myProject);
+        return BACKGROUND_POST_STARTUP_ACTIVITY.getExtensionList();
       });
+
+      runBackgroundPostStartupActivities(activities);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Background post-startup activities done in " + TimeoutUtil.getDurationMillis(startTimeNano) + "ms");
+      }
     }, Registry.intValue("ide.background.post.startup.activity.delay"), TimeUnit.MILLISECONDS);
     Disposer.register(myProject, () -> {
       scheduledFuture.cancel(false);
+    });
+  }
+
+  private void runBackgroundPostStartupActivities(@NotNull List<StartupActivity.Background> activities) {
+    BackgroundTaskUtil.runUnderDisposeAwareIndicator(myProject, () -> {
+      for (StartupActivity activity : activities) {
+        ProgressManager.checkCanceled();
+
+        if (myProject.isDisposed()) {
+          return;
+        }
+
+        runStartupActivity(activity);
+      }
     });
   }
 

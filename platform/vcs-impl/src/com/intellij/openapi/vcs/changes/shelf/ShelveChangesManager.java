@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.changes.shelf;
 
 import com.google.common.collect.Lists;
@@ -23,10 +23,7 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.registry.Registry;
@@ -46,6 +43,8 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.PathUtil;
 import com.intellij.util.SmartList;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.messages.Topic;
@@ -77,6 +76,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 
 import static com.intellij.openapi.util.text.StringUtil.notNullize;
+import static com.intellij.openapi.vcs.VcsNotificationIdsHolder.SHELVE_FAILED;
+import static com.intellij.openapi.vcs.VcsNotificationIdsHolder.SHELVE_SUCCESSFUL;
 import static com.intellij.openapi.vcs.changes.ChangeListUtil.getChangeListNameForUnshelve;
 import static com.intellij.openapi.vcs.changes.ChangeListUtil.getPredefinedChangeList;
 import static com.intellij.openapi.vcs.changes.shelf.ShelvedChangeList.createShelvedChangesFromFilePatches;
@@ -620,7 +621,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
     return result;
   }
 
-  @CalledInBackground
+  @RequiresBackgroundThread
   public List<ShelvedChangeList> importChangeLists(@NotNull Collection<? extends VirtualFile> files,
                                                    @NotNull Consumer<? super VcsException> exceptionConsumer) {
     final List<ShelvedChangeList> result = new ArrayList<>(files.size());
@@ -744,8 +745,8 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
                                  final boolean showSuccessNotification,
                                  final boolean systemOperation,
                                  final boolean reverse,
-                                 final String leftConflictTitle,
-                                 final String rightConflictTitle,
+                                 @NlsContexts.Label String leftConflictTitle,
+                                 @NlsContexts.Label String rightConflictTitle,
                                  boolean removeFilesFromShelf) {
     List<FilePatch> remainingPatches = new ArrayList<>();
 
@@ -783,7 +784,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
   }
 
   @NotNull
-  @CalledInAwt
+  @RequiresEdt
   Map<ShelvedChangeList, Date> deleteShelves(@NotNull List<ShelvedChangeList> shelvedListsToDelete,
                                              @NotNull List<ShelvedChangeList> shelvedListsFromChanges,
                                              @NotNull List<ShelvedChange> changesToDelete,
@@ -828,7 +829,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
   }
 
   @Nullable
-  @CalledInAwt
+  @RequiresEdt
   private ShelvedChangeList removeChangesFromChangeList(@NotNull ShelvedChangeList list,
                                                         @NotNull List<ShelvedChange> changes,
                                                         @NotNull List<? extends ShelvedBinaryFile> binaryFiles) {
@@ -904,18 +905,19 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
     clearShelvedLists(toDelete, true);
   }
 
-  @CalledInAwt
-  public void shelveSilentlyUnderProgress(@NotNull List<? extends Change> changes) {
+  @RequiresEdt
+  public void shelveSilentlyUnderProgress(@NotNull List<? extends Change> changes, boolean rollbackChanges) {
     final List<ShelvedChangeList> result = new ArrayList<>();
-    new Task.Backgroundable(myProject, VcsBundle.getString("shelve.changes.progress.title"), true) {
+    new Task.Backgroundable(myProject, VcsBundle.message("shelve.changes.progress.title"), true) {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        result.addAll(shelveChangesInSeparatedLists(changes));
+        result.addAll(shelveChangesInSeparatedLists(changes, rollbackChanges));
       }
 
       @Override
       public void onSuccess() {
-        VcsNotifier.getInstance(myProject).notifySuccess(VcsBundle.message("shelve.successful.message"));
+        VcsNotifier.getInstance(myProject).notifySuccess(SHELVE_SUCCESSFUL, "",
+                                                         VcsBundle.message("shelve.successful.message"));
         if (result.size() == 1 && isShelfContentActive()) {
           ShelvedChangesViewManager.getInstance(myProject).startEditing(result.get(0));
         }
@@ -939,15 +941,20 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
   }
 
   @NotNull
-  private List<ShelvedChangeList> shelveChangesInSeparatedLists(@NotNull Collection<? extends Change> changes) {
+  private List<ShelvedChangeList> shelveChangesInSeparatedLists(@NotNull Collection<? extends Change> changes, boolean rollbackChanges) {
     List<String> failedChangeLists = new ArrayList<>();
     List<ShelvedChangeList> result = new ArrayList<>();
     List<Change> shelvedChanges = new ArrayList<>();
 
     try {
+      ChangeListManager changeListManager = ChangeListManager.getInstance(myProject);
+      if (!changeListManager.areChangeListsEnabled()) {
+        LOG.warn("Changelists are disabled", new Throwable());
+      }
+
       SHELVED_FILES_LOCK.writeLock().lock();
       rememberShelvingFiles(changes);
-      List<LocalChangeList> changeLists = ChangeListManager.getInstance(myProject).getChangeLists();
+      List<LocalChangeList> changeLists = changeListManager.getChangeLists();
       for (LocalChangeList list : changeLists) {
         Set<Change> changeSet = new HashSet<>(list.getChanges());
 
@@ -985,26 +992,28 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
       notifyStateChanged();
     }
 
-    rollbackChangesAfterShelve(shelvedChanges, false);
+    if (rollbackChanges) {
+      rollbackChangesAfterShelve(shelvedChanges, false);
+    }
 
     if (!failedChangeLists.isEmpty()) {
-      VcsNotifier.getInstance(myProject).notifyError(VcsBundle.message("shelve.failed.title"), VcsBundle
-        .message("shelve.failed.message", failedChangeLists.size(), StringUtil.join(failedChangeLists, ",")));
+      VcsNotifier.getInstance(myProject).notifyError(
+        SHELVE_FAILED,
+        VcsBundle.message("shelve.failed.title"),
+        VcsBundle.message("shelve.failed.message", failedChangeLists.size(), StringUtil.join(failedChangeLists, ",")));
     }
     return result;
   }
 
-  @CalledInAwt
+  @RequiresEdt
   public static void unshelveSilentlyWithDnd(@NotNull Project project,
                                              @NotNull ShelvedChangeListDragBean shelvedChangeListDragBean,
-                                             @Nullable ChangesBrowserNode dropRootNode,
+                                             @Nullable LocalChangeList targetChangeList,
                                              boolean removeFilesFromShelf) {
     FileDocumentManager.getInstance().saveAllDocuments();
-    LocalChangeList predefinedChangeList =
-      dropRootNode != null ? ObjectUtils.tryCast(dropRootNode.getUserObject(), LocalChangeList.class) : null;
     getInstance(project).unshelveSilentlyAsynchronously(project, shelvedChangeListDragBean.getShelvedChangelists(),
                                                         shelvedChangeListDragBean.getChanges(),
-                                                        shelvedChangeListDragBean.getBinaryFiles(), predefinedChangeList,
+                                                        shelvedChangeListDragBean.getBinaryFiles(), targetChangeList,
                                                         removeFilesFromShelf);
   }
 
@@ -1022,7 +1031,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
                                               @NotNull final List<ShelvedChange> selectedChanges,
                                               @NotNull final List<? extends ShelvedBinaryFile> selectedBinaryChanges,
                                               @Nullable final LocalChangeList forcePredefinedOneChangelist, boolean removeFilesFromShelf) {
-    ProgressManager.getInstance().run(new Task.Backgroundable(project, VcsBundle.getString("unshelve.changes.progress.title"), true) {
+    ProgressManager.getInstance().run(new Task.Backgroundable(project, VcsBundle.message("unshelve.changes.progress.title"), true) {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
         for (ShelvedChangeList changeList : selectedChangeLists) {
@@ -1035,15 +1044,16 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
                              shouldUnshelveAllList ? null : binariesForChangelist,
                              forcePredefinedOneChangelist != null ? forcePredefinedOneChangelist : getChangeListUnshelveTo(changeList),
                              true, removeFilesFromShelf);
-          ChangeListManagerImpl.getInstanceImpl(myProject).waitForUpdate(VcsBundle.getString("unshelve.changes.progress.title"));
+          ChangeListManagerEx.getInstanceEx(myProject).waitForUpdate();
         }
       }
     });
   }
 
-  @NotNull
+  @Nullable
   private LocalChangeList getChangeListUnshelveTo(@NotNull ShelvedChangeList list) {
     ChangeListManager manager = ChangeListManager.getInstance(myProject);
+    if (!manager.areChangeListsEnabled()) return null;
     LocalChangeList localChangeList = getPredefinedChangeList(list, manager);
     return localChangeList != null ? localChangeList : manager.addChangeList(getChangeListNameForUnshelve(list), "");
   }
@@ -1088,7 +1098,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   public void updateListAfterUnshelve(@NotNull ShelvedChangeList listToUpdate,
                                       @NotNull List<? extends FilePatch> patches,
                                       @NotNull List<? extends ShelvedBinaryFile> binaries,
@@ -1103,7 +1113,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
    * changes and delete these changes from the original list - > in this case new list with applied (deleted) changes will be a return value
    */
   @Nullable
-  @CalledInAwt
+  @RequiresEdt
   private ShelvedChangeList saveRemainingPatchesIfNeeded(final ShelvedChangeList changeList,
                                                          final List<? extends FilePatch> remainingPatches,
                                                          final List<? extends ShelvedBinaryFile> remainingBinaries,
@@ -1142,7 +1152,7 @@ public final class ShelveChangesManager implements PersistentStateComponent<Elem
    * @return newly created recycled/deleted list or null if no new list was created
    */
   @Nullable
-  @CalledInAwt
+  @RequiresEdt
   private ShelvedChangeList saveRemainingAndRecycleOthers(@NotNull final ShelvedChangeList changeList,
                                                           final List<? extends FilePatch> remainingPatches,
                                                           final List<? extends ShelvedBinaryFile> remainingBinaries,

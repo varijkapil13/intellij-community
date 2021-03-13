@@ -256,7 +256,7 @@ public class TooBroadScopeInspection extends BaseInspection {
     @Override
     public void visitLocalVariable(PsiLocalVariable variable) {
       super.visitLocalVariable(variable);
-      if (variable instanceof PsiResourceVariable) {
+      if (variable.getType() == PsiType.NULL || variable instanceof PsiResourceVariable) {
         return;
       }
       final PsiExpression initializer = variable.getInitializer();
@@ -313,7 +313,9 @@ public class TooBroadScopeInspection extends BaseInspection {
             // String s = "";
             // String t = "";
             // String u = s + t;
-            registerError(nameIdentifier, ProblemHighlightType.INFORMATION, variable);
+            if (isOnTheFly()) {
+              registerError(nameIdentifier, ProblemHighlightType.INFORMATION, variable);
+            }
           }
           return;
         }

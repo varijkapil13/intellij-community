@@ -34,6 +34,7 @@ import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.changeSignature.ContractConverter;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
 import com.intellij.refactoring.changeSignature.inCallers.AbstractJavaMemberCallerChooser;
+import com.intellij.refactoring.move.moveClassesOrPackages.ModuleInfoUsageDetector;
 import com.intellij.refactoring.safeDelete.usageInfo.*;
 import com.intellij.refactoring.util.ConflictsUtil;
 import com.intellij.refactoring.util.RefactoringMessageUtil;
@@ -68,6 +69,8 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
       if (element instanceof PsiTypeParameter) {
         findTypeParameterExternalUsages((PsiTypeParameter)element, usages);
       }
+      ModuleInfoUsageDetector.createSafeDeleteUsageInstance(element.getProject(), allElementsToDelete)
+        .detectModuleStatementsUsed(usages, MultiMap.create());
     }
     else if (element instanceof PsiMethod) {
       insideDeletedCondition = findMethodUsages((PsiMethod) element, allElementsToDelete, usages);
@@ -117,7 +120,7 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
     }
     if (element instanceof PsiMethod) {
       final PsiMethod[] methods =
-        SuperMethodWarningUtil.checkSuperMethods((PsiMethod)element, JavaRefactoringBundle.message("to.delete.with.usage.search"),
+        SuperMethodWarningUtil.checkSuperMethods((PsiMethod)element,
                                                  allElementsToDelete);
       if (methods.length == 0) return null;
       final ArrayList<PsiMethod> psiMethods = new ArrayList<>(Arrays.asList(methods));
@@ -360,7 +363,9 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         }
         final ArrayList<UsageInfo> selected = dialog.getSelected();
         final Set<UsageInfo> unselected = new HashSet<>(overridingMethods);
-        unselected.removeAll(selected);
+        for (UsageInfo usageInfo : selected) {
+          unselected.remove(usageInfo);
+        }
 
         if (!unselected.isEmpty()) {
           final List<PsiMethod> unselectedMethods = ContainerUtil.map(unselected, info -> ((SafeDeleteOverridingMethodUsageInfo)info).getOverridingMethod());

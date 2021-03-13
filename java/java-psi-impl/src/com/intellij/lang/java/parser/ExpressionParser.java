@@ -25,7 +25,7 @@ public class ExpressionParser {
     CONDITIONAL_OR, CONDITIONAL_AND, OR, XOR, AND, EQUALITY, RELATIONAL, SHIFT, ADDITIVE, MULTIPLICATIVE, UNARY, TYPE
   }
 
-  private static final TokenSet ASSIGNMENT_OPS = TokenSet.create(
+  public static final TokenSet ASSIGNMENT_OPS = TokenSet.create(
     JavaTokenType.EQ, JavaTokenType.ASTERISKEQ, JavaTokenType.DIVEQ, JavaTokenType.PERCEQ, JavaTokenType.PLUSEQ, JavaTokenType.MINUSEQ,
     JavaTokenType.LTLTEQ, JavaTokenType.GTGTEQ, JavaTokenType.GTGTGTEQ, JavaTokenType.ANDEQ, JavaTokenType.OREQ, JavaTokenType.XOREQ);
   private static final TokenSet RELATIONAL_OPS = TokenSet.create(JavaTokenType.LT, JavaTokenType.GT, JavaTokenType.LE, JavaTokenType.GE);
@@ -38,9 +38,9 @@ public class ExpressionParser {
   private static final TokenSet XOR_OPS = TokenSet.create(JavaTokenType.XOR);
   private static final TokenSet AND_OPS = TokenSet.create(JavaTokenType.AND);
   private static final TokenSet EQUALITY_OPS = TokenSet.create(JavaTokenType.EQEQ, JavaTokenType.NE);
-  private static final TokenSet SHIFT_OPS = TokenSet.create(JavaTokenType.LTLT, JavaTokenType.GTGT, JavaTokenType.GTGTGT);
-  private static final TokenSet ADDITIVE_OPS = TokenSet.create(JavaTokenType.PLUS, JavaTokenType.MINUS);
-  private static final TokenSet MULTIPLICATIVE_OPS = TokenSet.create(JavaTokenType.ASTERISK, JavaTokenType.DIV, JavaTokenType.PERC);
+  public static final TokenSet SHIFT_OPS = TokenSet.create(JavaTokenType.LTLT, JavaTokenType.GTGT, JavaTokenType.GTGTGT);
+  public static final TokenSet ADDITIVE_OPS = TokenSet.create(JavaTokenType.PLUS, JavaTokenType.MINUS);
+  public static final TokenSet MULTIPLICATIVE_OPS = TokenSet.create(JavaTokenType.ASTERISK, JavaTokenType.DIV, JavaTokenType.PERC);
   private static final TokenSet ARGS_LIST_END = TokenSet.create(JavaTokenType.RPARENTH, JavaTokenType.RBRACE, JavaTokenType.RBRACKET);
   private static final TokenSet ARGS_LIST_CONTINUE = TokenSet.create(
     JavaTokenType.IDENTIFIER, TokenType.BAD_CHARACTER, JavaTokenType.COMMA, JavaTokenType.INTEGER_LITERAL, JavaTokenType.STRING_LITERAL);
@@ -48,6 +48,7 @@ public class ExpressionParser {
   private static final TokenSet ID_OR_SUPER = TokenSet.create(JavaTokenType.IDENTIFIER, JavaTokenType.SUPER_KEYWORD);
   private static final TokenSet TYPE_START = TokenSet.orSet(
     ElementType.PRIMITIVE_TYPE_BIT_SET, TokenSet.create(JavaTokenType.IDENTIFIER, JavaTokenType.AT));
+  private static final TokenSet PATTERN_MODIFIERS = TokenSet.create(JavaTokenType.FINAL_KEYWORD);
 
   private static final Key<Boolean> CASE_LABEL = Key.create("java.parser.case.label.expr");
 
@@ -176,22 +177,42 @@ public class ExpressionParser {
 
   @Nullable
   private PsiBuilder.Marker parsePattern(final PsiBuilder builder) {
+    PsiBuilder.Marker typeTestPattern = parseSimpleTypeTest(builder);
+    if (typeTestPattern != null) return typeTestPattern;
+
     PsiBuilder.Marker pattern = builder.mark();
     PsiBuilder.Marker patternVariable = builder.mark();
+    PsiBuilder.Marker modifiers = myParser.getDeclarationParser().parseModifierList(builder, PATTERN_MODIFIERS).first;
+
     PsiBuilder.Marker type = myParser.getReferenceParser().parseType(builder, ReferenceParser.EAT_LAST_DOT | ReferenceParser.WILDCARD);
     if (type == null) {
       patternVariable.drop();
       pattern.drop();
+      modifiers.drop();
       return null;
     }
     if (!expect(builder, JavaTokenType.IDENTIFIER)) {
       patternVariable.drop();
+      modifiers.drop();
     } else {
       patternVariable.done(JavaElementType.PATTERN_VARIABLE);
     }
     pattern.done(JavaElementType.TYPE_TEST_PATTERN);
     return pattern;
   }
+
+  @Nullable
+  private PsiBuilder.Marker parseSimpleTypeTest(final PsiBuilder builder) {
+    PsiBuilder.Marker pattern = builder.mark();
+    PsiBuilder.Marker type = myParser.getReferenceParser().parseType(builder, ReferenceParser.EAT_LAST_DOT | ReferenceParser.WILDCARD);
+    if (type == null || builder.getTokenType() == JavaTokenType.IDENTIFIER) {
+      pattern.rollbackTo();
+      return null;
+    }
+    pattern.done(JavaElementType.TYPE_TEST_PATTERN);
+    return pattern;
+  }
+
 
   @Nullable
   private PsiBuilder.Marker parseBinary(final PsiBuilder builder, final ExprType type, final TokenSet ops) {

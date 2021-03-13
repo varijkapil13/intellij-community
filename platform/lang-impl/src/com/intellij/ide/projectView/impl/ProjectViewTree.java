@@ -18,6 +18,7 @@ import com.intellij.ui.popup.HintUpdateSupply;
 import com.intellij.ui.tabs.FileColorManagerImpl;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,6 +35,12 @@ import java.awt.*;
 public class ProjectViewTree extends DnDAwareTree {
   private static final Logger LOG = Logger.getInstance(ProjectViewTree.class);
 
+  /**
+   * @deprecated use another constructor instead
+   */
+  @Deprecated
+  @SuppressWarnings("unused")
+  @ApiStatus.ScheduledForRemoval(inVersion = "2022.2")
   protected ProjectViewTree(Project project, TreeModel model) {
     this(model);
   }
@@ -59,6 +66,7 @@ public class ProjectViewTree extends DnDAwareTree {
    * use {@link #getSelectionPaths()} or {@link TreeUtil#getSelectedPathIfOne(JTree)} directly.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public DefaultMutableTreeNode getSelectedNode() {
     TreePath path = TreeUtil.getSelectedPathIfOne(this);
     return path == null ? null : ObjectUtils.tryCast(path.getLastPathComponent(), DefaultMutableTreeNode.class);

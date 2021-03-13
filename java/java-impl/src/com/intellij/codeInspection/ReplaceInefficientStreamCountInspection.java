@@ -1,4 +1,4 @@
-// Copyright 2000-2017 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection;
 
 import com.intellij.codeInspection.redundantCast.RemoveRedundantCastUtil;
@@ -6,6 +6,7 @@ import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.java.JavaBundle;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiUtil;
@@ -32,6 +33,10 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
       CommonClassNames.JAVA_UTIL_FUNCTION_FUNCTION);
   private static final CallMatcher STREAM_FILTER =
     CallMatcher.instanceCall(CommonClassNames.JAVA_UTIL_STREAM_BASE_STREAM, "filter").parameterCount(1);
+  private static final CallMatcher STREAM_PEEK =
+    CallMatcher.instanceCall(CommonClassNames.JAVA_UTIL_STREAM_BASE_STREAM, "peek").parameterCount(1);
+  private static final CallMatcher STREAM_LIMIT =
+    CallMatcher.instanceCall(CommonClassNames.JAVA_UTIL_STREAM_BASE_STREAM, "limit").parameterCount(1);
 
   private static final CallMapper<CountFix> FIX_MAPPER = new CallMapper<CountFix>()
     .register(COLLECTION_STREAM, call -> new CountFix(SimplificationMode.COLLECTION_SIZE))
@@ -62,6 +67,21 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
         if (STREAM_COUNT.test(methodCall)) {
           PsiMethodCallExpression qualifierCall = getQualifierMethodCall(methodCall);
           CountFix fix = FIX_MAPPER.mapFirst(qualifierCall);
+          if (fix == null &&
+              !(STREAM_LIMIT.test(qualifierCall) && ExpressionUtils.isOne(qualifierCall.getArgumentList().getExpressions()[0])) &&
+              !hasPeekCallBefore(methodCall)) {
+            if (extractComparisonWithZero(methodCall) != null) {
+              fix = new CountFix(SimplificationMode.IS_PRESENT);
+            } else if (extractComparisonWithZeroEq(methodCall) != null) {
+              final SimplificationMode simplificationMode;
+              if (PsiUtil.getLanguageLevel(methodCall).isAtLeast(LanguageLevel.JDK_11)) {
+                simplificationMode = SimplificationMode.IS_EMPTY;
+              } else {
+                simplificationMode = SimplificationMode.NOT_IS_PRESENT;
+              }
+              fix = new CountFix(simplificationMode);
+            }
+          }
           if (fix != null) {
             PsiElement nameElement = methodCall.getMethodExpression().getReferenceNameElement();
             LOG.assertTrue(nameElement != null);
@@ -73,8 +93,8 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
   }
 
   @Nullable
-  private static PsiBinaryExpression extractComparisonWithZero(PsiMethodCallExpression filterCall) {
-    PsiBinaryExpression binary = extractBinary(filterCall);
+  private static PsiBinaryExpression extractComparisonWithZero(PsiMethodCallExpression call) {
+    PsiBinaryExpression binary = extractBinary(call);
     if (binary == null) return null;
     IElementType tokenType = binary.getOperationTokenType();
     if(ExpressionUtils.isZero(binary.getLOperand()) && (tokenType == JavaTokenType.LT || tokenType == JavaTokenType.NE) ||
@@ -85,8 +105,8 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
   }
 
   @Nullable
-  private static PsiBinaryExpression extractComparisonWithZeroEq(PsiMethodCallExpression filterCall) {
-    PsiBinaryExpression binary = extractBinary(filterCall);
+  private static PsiBinaryExpression extractComparisonWithZeroEq(PsiMethodCallExpression call) {
+    PsiBinaryExpression binary = extractBinary(call);
     if (binary == null) return null;
     IElementType tokenType = binary.getOperationTokenType();
     if(ExpressionUtils.isZero(binary.getLOperand()) && tokenType == JavaTokenType.EQEQ ||
@@ -97,8 +117,15 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
   }
 
   @Nullable
-  private static PsiBinaryExpression extractBinary(PsiMethodCallExpression filterCall) {
-    PsiMethodCallExpression countCall = ExpressionUtils.getCallForQualifier(filterCall);
+  private static PsiBinaryExpression extractBinary(PsiMethodCallExpression call) {
+    final PsiMethodCallExpression countCall;
+    if (STREAM_FILTER.test(call)) {
+      countCall = ExpressionUtils.getCallForQualifier(call);
+    } else if (STREAM_COUNT.test(call)) {
+      countCall = call;
+    } else {
+      countCall = null;
+    }
     if(countCall == null) return null;
     PsiElement parent = PsiUtil.skipParenthesizedExprUp(countCall.getParent());
     if(parent == null) return null;
@@ -141,11 +168,22 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
     return PsiUtil.skipParenthesizedExprDown(expression);
   }
 
+  private static boolean hasPeekCallBefore(@NotNull PsiMethodCallExpression call) {
+    PsiMethodCallExpression qualifierCall = getQualifierMethodCall(call);
+    while (qualifierCall != null && !STREAM_PEEK.test(qualifierCall)) {
+      qualifierCall = getQualifierMethodCall(qualifierCall);
+    }
+    return qualifierCall != null;
+  }
+
   private enum SimplificationMode {
     SUM("Stream.flatMap().count()", "Stream.mapToLong().sum()"),
     COLLECTION_SIZE("Collection.stream().count()", "Collection.size()"),
     ANY_MATCH("Stream().filter().count() > 0", "stream.anyMatch()"),
-    NONE_MATCH("Stream().filter().count() == 0", "stream.noneMatch()");
+    NONE_MATCH("Stream().filter().count() == 0", "stream.noneMatch()"),
+    IS_PRESENT("stream.count() > 0", "stream.findAny().isPresent()"),
+    NOT_IS_PRESENT("stream.count() == 0", "!stream.findAny().isPresent()"),
+    IS_EMPTY("stream.count() == 0", "stream.findAny().isEmpty()");
 
     private final @NonNls @NotNull String myOld;
     private final @NonNls @NotNull String myNew;
@@ -194,7 +232,6 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
       PsiElement countName = countCall.getMethodExpression().getReferenceNameElement();
       if (countName == null) return;
       PsiMethodCallExpression qualifierCall = getQualifierMethodCall(countCall);
-      if (qualifierCall == null) return;
       switch (mySimplificationMode) {
         case SUM:
           replaceFlatMap(countName, qualifierCall);
@@ -207,6 +244,13 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
           break;
         case NONE_MATCH:
           replaceFilterCountComparison(qualifierCall, false);
+          break;
+        case IS_PRESENT:
+          replaceSimpleCountComparison(countCall, true);
+          break;
+        case NOT_IS_PRESENT:
+        case IS_EMPTY:
+          replaceSimpleCountComparison(countCall, false);
           break;
       }
     }
@@ -279,6 +323,25 @@ public class ReplaceInefficientStreamCountInspection extends AbstractBaseJavaLoc
       if(parameterList != null) {
         parameterList.delete();
       }
+    }
+
+    private static void replaceSimpleCountComparison(PsiMethodCallExpression countCall, boolean isPresent) {
+      PsiBinaryExpression comparison = isPresent ? extractComparisonWithZero(countCall) : extractComparisonWithZeroEq(countCall);
+      if (comparison == null) return;
+      PsiExpression countQualifier = countCall.getMethodExpression().getQualifierExpression();
+      if (countQualifier == null) return;
+      String base = countQualifier.getText();
+      CommentTracker ct = new CommentTracker();
+      if (isPresent) {
+        ct.replaceAndRestoreComments(comparison, base + "." + "findAny().isPresent()");
+      } else {
+        if (PsiUtil.getLanguageLevel(countCall).isAtLeast(LanguageLevel.JDK_11)) {
+          ct.replaceAndRestoreComments(comparison, base + "." + "findAny().isEmpty()");
+        } else {
+          ct.replaceAndRestoreComments(comparison, "!" + base + "." + "findAny().isPresent()");
+        }
+      }
+
     }
 
     public @InspectionMessage String getMessage() {

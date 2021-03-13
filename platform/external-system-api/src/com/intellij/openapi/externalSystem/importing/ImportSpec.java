@@ -19,7 +19,6 @@ import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
 import com.intellij.openapi.externalSystem.service.project.ExternalProjectRefreshCallback;
 import com.intellij.openapi.project.Project;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,15 +35,6 @@ public interface ImportSpec {
 
   @NotNull
   ProgressExecutionMode getProgressExecutionMode();
-
-  boolean isForceWhenUptodate();
-
-  /**
-   * @deprecated see {@link com.intellij.openapi.externalSystem.settings.ExternalProjectSettings#setUseAutoImport} for details
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  default boolean whenAutoImportEnabled() { return false; }
 
   @Nullable
   ExternalProjectRefreshCallback getCallback();

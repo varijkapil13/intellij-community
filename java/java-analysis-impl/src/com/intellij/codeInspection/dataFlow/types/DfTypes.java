@@ -11,8 +11,8 @@ import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Commonly used types and factory methods
@@ -100,7 +100,7 @@ public final class DfTypes {
    * A special value that represents a contract failure after method return (the control flow should immediately proceed
    * with exception handling). This value is like a constant but it's type doesn't correspond to any JVM type.
    */
-  public static final DfType FAIL = new DfConstantType<Object>(ObjectUtils.sentinel("FAIL")) {
+  public static final DfType FAIL = new DfConstantType<>(ObjectUtils.sentinel("FAIL")) {
     @NotNull
     @Override
     public PsiType getPsiType() {
@@ -187,7 +187,7 @@ public final class DfTypes {
   /**
    * A type that corresponds to JVM int type
    */
-  public static final DfIntType INT = new DfIntRangeType(LongRangeSet.fromType(PsiType.INT));
+  public static final DfIntType INT = new DfIntRangeType(Objects.requireNonNull(LongRangeSet.fromType(PsiType.INT)), null);
 
   /**
    * Creates a type that represents a subset of int values, clamping values not representable in the JVM int type.
@@ -215,7 +215,19 @@ public final class DfTypes {
     if (value != null) {
       return intValue(Math.toIntExact(value));
     }
-    return new DfIntRangeType(range);
+    return new DfIntRangeType(range, null);
+  }
+
+  static @NotNull DfType intRange(@NotNull LongRangeSet range, @Nullable LongRangeSet wideRange) {
+    if (wideRange == null || wideRange.equals(range) || wideRange.isEmpty()) return intRange(range);
+    if (range.isEmpty()) {
+      return BOTTOM;
+    }
+    Long value = range.getConstantValue();
+    if (value != null) {
+      return new DfIntConstantType(Math.toIntExact(value), wideRange);
+    }
+    return new DfIntRangeType(range, wideRange);
   }
 
   /**
@@ -224,13 +236,13 @@ public final class DfTypes {
    */
   @NotNull
   public static DfIntConstantType intValue(int value) {
-    return new DfIntConstantType(value);
+    return new DfIntConstantType(value, null);
   }
 
   /**
    * A type that corresponds to JVM long type
    */
-  public static final DfLongType LONG = new DfLongRangeType(LongRangeSet.all());
+  public static final DfLongType LONG = new DfLongRangeType(LongRangeSet.all(), null);
 
   /**
    * Creates a type that represents a subset of long values.
@@ -246,7 +258,19 @@ public final class DfTypes {
     if (value != null) {
       return longValue(value);
     }
-    return new DfLongRangeType(range);
+    return new DfLongRangeType(range, null);
+  }
+
+  static @NotNull DfType longRange(@NotNull LongRangeSet range, @Nullable LongRangeSet wideRange) {
+    if (wideRange == null || wideRange.equals(range) || wideRange.isEmpty()) return longRange(range);
+    if (range.isEmpty()) {
+      return BOTTOM;
+    }
+    Long value = range.getConstantValue();
+    if (value != null) {
+      return new DfLongConstantType(value, wideRange);
+    }
+    return new DfLongRangeType(range, wideRange);
   }
 
   /**
@@ -255,7 +279,7 @@ public final class DfTypes {
    */
   @NotNull
   public static DfLongConstantType longValue(long value) {
-    return new DfLongConstantType(value);
+    return new DfLongConstantType(value, null);
   }
 
   /**
@@ -388,7 +412,7 @@ public final class DfTypes {
    * A reference type that contains any reference to a local object
    */
   public static final DfReferenceType LOCAL_OBJECT =
-    new DfGenericObjectType(Collections.emptySet(), TypeConstraints.TOP, DfaNullability.NOT_NULL, Mutability.UNKNOWN,
+    new DfGenericObjectType(Set.of(), TypeConstraints.TOP, DfaNullability.NOT_NULL, Mutability.UNKNOWN,
                             null, BOTTOM, true);
 
   /**
@@ -421,7 +445,17 @@ public final class DfTypes {
     if (constant instanceof Double) {
       return doubleValue((Double)constant);
     }
-    return new DfReferenceConstantType(constant, type, TypeConstraints.instanceOf(type));
+    return new DfReferenceConstantType(constant, type, TypeConstraints.instanceOf(type), false);
+  }
+
+  /**
+   * @param constant string constant
+   * @param stringType string type
+   * @return concatenation result string
+   */
+  @NotNull
+  public static DfConstantType<?> concatenationResult(@NotNull String constant, @NotNull PsiType stringType) {
+    return new DfReferenceConstantType(constant, stringType, TypeConstraints.exact(stringType), true);
   }
 
   /**
@@ -473,7 +507,7 @@ public final class DfTypes {
     if (constraint == TypeConstraints.BOTTOM) {
       return nullability == Nullability.NOT_NULL ? BOTTOM : NULL;
     }
-    return new DfGenericObjectType(Collections.emptySet(), constraint,
+    return new DfGenericObjectType(Set.of(), constraint,
                                    DfaNullability.fromNullability(nullability), Mutability.UNKNOWN, null, BOTTOM, false);
   }
 
@@ -503,6 +537,6 @@ public final class DfTypes {
     if (nullability == DfaNullability.NULL) {
       throw new IllegalArgumentException();
     }
-    return new DfGenericObjectType(Collections.emptySet(), constraint, nullability, mutability, specialField, sfType, false);
+    return new DfGenericObjectType(Set.of(), constraint, nullability, mutability, specialField, sfType, false);
   }
 }

@@ -29,6 +29,7 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.JBPopupListener;
 import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
@@ -129,7 +130,7 @@ public class EditPropertyValueAction extends BaseRefactoringAction {
     Ref<JBPopup> popupRef = new Ref<>();
     EditorTextField textField = new EditorTextField(unescaped.first, editor.getProject(), FileTypes.PLAIN_TEXT) {
       @Override
-      protected EditorEx createEditor() {
+      protected @NotNull EditorEx createEditor() {
         EditorEx e = super.createEditor();
         e.getCaretModel().moveToOffset(Math.max(0, Math.min(e.getDocument().getTextLength(), unescaped.second)));
         e.setHorizontalScrollbarVisible(true);
@@ -289,7 +290,7 @@ public class EditPropertyValueAction extends BaseRefactoringAction {
     return button;
   }
 
-  private static LightweightHint showTooltip(@NotNull Editor editor, @Nullable VirtualFile file, @Nullable String key) {
+  private static LightweightHint showTooltip(@NotNull Editor editor, @Nullable VirtualFile file, @Nullable @NlsSafe String key) {
     if (file == null && key == null) return null;
     JPanel panel = new JPanel();
     panel.setLayout(new FlowLayout(FlowLayout.CENTER, 0, 0));
@@ -341,7 +342,7 @@ public class EditPropertyValueAction extends BaseRefactoringAction {
       Editor editor = foldRegion.getEditor();
       JComponent editorComponent = editor.getContentComponent();
       focusAndRun(editorComponent, () -> {
-        WriteCommandAction.runWriteCommandAction(project, "Edit property value", null, () -> {
+        WriteCommandAction.runWriteCommandAction(project, JavaI18nBundle.message("command.name.edit.property.value"), null, () -> {
           handler.setValue(newValue.replace("\n", "\\n"));
           String oldPlaceholder = foldRegion.getPlaceholderText();
           String newPlaceholder = handler.getPlaceholder();

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vfs.encoding;
 
 import com.intellij.concurrency.ConcurrentCollectionFactory;
@@ -23,7 +23,6 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -34,13 +33,15 @@ import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 import com.intellij.ui.GuiUtils;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.TObjectHashingStrategy;
+import com.intellij.util.containers.HashingStrategy;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.PropertyKey;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -58,19 +59,18 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
   private @Nullable Charset myDefaultConsoleCharset;
   private final SimpleModificationTracker myModificationTracker = new SimpleModificationTracker();
   private BOMForNewUTF8Files myBomForNewUtf8Files = BOMForNewUTF8Files.NEVER;
-  private final Map<VirtualFilePointer, Charset> myMapping = ConcurrentCollectionFactory.createMap(
-    new TObjectHashingStrategy<VirtualFilePointer>() {
-      @Override
-      public int computeHashCode(VirtualFilePointer pointer) {
-        // TODO !! hashCode is unstable - VirtualFilePointer URL can change
-        return FileUtil.PATH_HASHING_STRATEGY.computeHashCode(pointer.getUrl());
-      }
+  private final Map<VirtualFilePointer, Charset> myMapping = ConcurrentCollectionFactory.createConcurrentMap(new HashingStrategy<>() {
+    @Override
+    public int hashCode(VirtualFilePointer pointer) {
+      // TODO !! hashCode is unstable - VirtualFilePointer URL can change
+      return FileUtil.PATH_HASHING_STRATEGY.computeHashCode(pointer.getUrl());
+    }
 
-      @Override
-      public boolean equals(VirtualFilePointer o1, VirtualFilePointer o2) {
-        return FileUtil.PATH_HASHING_STRATEGY.equals(o1.getUrl(), o2.getUrl());
-      }
-    });
+    @Override
+    public boolean equals(VirtualFilePointer o1, VirtualFilePointer o2) {
+      return FileUtil.PATH_HASHING_STRATEGY.equals(o1.getUrl(), o2.getUrl());
+    }
+  });
   private volatile Charset myProjectCharset;
 
   public EncodingProjectManagerImpl(@NotNull Project project) {
@@ -123,7 +123,7 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
       element.setAttribute("defaultCharsetForConsole", myDefaultConsoleCharset.name());
     }
     if (myBomForNewUtf8Files != BOMForNewUTF8Files.NEVER) {
-      element.setAttribute("addBOMForNewFiles", myBomForNewUtf8Files.name);
+      element.setAttribute("addBOMForNewFiles", myBomForNewUtf8Files.getExternalName());
     }
 
     return element;
@@ -157,7 +157,7 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
     myNative2AsciiForPropertiesFiles = Boolean.parseBoolean(element.getAttributeValue("native2AsciiForPropertiesFiles"));
     myDefaultCharsetForPropertiesFiles = CharsetToolkit.forName(element.getAttributeValue("defaultCharsetForPropertiesFiles"));
     myDefaultConsoleCharset = CharsetToolkit.forName(element.getAttributeValue("defaultCharsetForConsole"));
-    myBomForNewUtf8Files = BOMForNewUTF8Files.getByNameOrDefault(element.getAttributeValue("addBOMForNewFiles"));
+    myBomForNewUtf8Files = BOMForNewUTF8Files.getByExternalName(element.getAttributeValue("addBOMForNewFiles"));
 
     myModificationTracker.incModificationCount();
   }
@@ -181,6 +181,12 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
   @Override
   @Nullable
   public Charset getEncoding(@Nullable VirtualFile virtualFile, boolean useParentDefaults) {
+    if (virtualFile != null) {
+      for (FileEncodingProvider encodingProvider : FileEncodingProvider.EP_NAME.getIterable()) {
+        Charset encoding = encodingProvider.getEncoding(virtualFile);
+        if (encoding != null) return encoding;
+      }
+    }
     VirtualFile parent = virtualFile;
     while (parent != null) {
       Charset charset = myMapping.get(new LightFilePointer(parent.getUrl()));
@@ -456,7 +462,7 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
   public void setNative2AsciiForPropertiesFiles(final VirtualFile virtualFile, final boolean native2Ascii) {
     if (myNative2AsciiForPropertiesFiles != native2Ascii) {
       myNative2AsciiForPropertiesFiles = native2Ascii;
-      EncodingManagerImpl.firePropertyChange(null, PROP_NATIVE2ASCII_SWITCH, !native2Ascii, native2Ascii, myProject);
+      EncodingManagerImpl.firePropertyChange(null, PROP_NATIVE2ASCII_SWITCH, !native2Ascii, native2Ascii);
     }
   }
 
@@ -483,7 +489,7 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
     Charset old = myDefaultCharsetForPropertiesFiles;
     if (!Comparing.equal(old, charset)) {
       myDefaultCharsetForPropertiesFiles = charset;
-      EncodingManagerImpl.firePropertyChange(null, PROP_PROPERTIES_FILES_ENCODING, old, charset, myProject);
+      EncodingManagerImpl.firePropertyChange(null, PROP_PROPERTIES_FILES_ENCODING, old, charset);
     }
   }
 
@@ -499,31 +505,37 @@ public final class EncodingProjectManagerImpl extends EncodingProjectManager imp
   }
 
   public enum BOMForNewUTF8Files {
-    ALWAYS("with BOM"),
-    NEVER("with NO BOM"),
-    WINDOWS_ONLY("with BOM under Windows, with no BOM otherwise");
+    ALWAYS("create.new.UT8.file.option.always"),
+    NEVER("create.new.UT8.file.option.never"),
+    WINDOWS_ONLY("create.new.UT8.file.option.only.under.windows");
 
-    private final String name;
+    private final String key;
 
-    BOMForNewUTF8Files(@NotNull String name) {
-      this.name = name;
+    BOMForNewUTF8Files(@NotNull @PropertyKey(resourceBundle = IdeBundle.BUNDLE) String key) {
+      this.key = key;
     }
 
     @Override
     public String toString() {
-      return name;
+      return IdeBundle.message(key);
+    }
+
+    static final Pair<String, BOMForNewUTF8Files>[] EXTERNAL_NAMES = new Pair[]{
+      Pair.create("with BOM", ALWAYS),
+      Pair.create("with NO BOM", NEVER),
+      Pair.create("with BOM under Windows, with no BOM otherwise", WINDOWS_ONLY)};
+
+    @NotNull
+    private static BOMForNewUTF8Files getByExternalName(@Nullable String externalName) {
+      int i = ArrayUtil.indexOf(EXTERNAL_NAMES, Pair.create(externalName, null), (pair1, pair2) -> pair1.first.equalsIgnoreCase(pair2.first));
+      if (i == -1) i = 1; // NEVER
+      return EXTERNAL_NAMES[i].second;
     }
 
     @NotNull
-    private static BOMForNewUTF8Files getByNameOrDefault(@Nullable String name) {
-      if (!StringUtil.isEmpty(name)) {
-        for (BOMForNewUTF8Files value : values()) {
-          if (value.name.equalsIgnoreCase(name)) {
-            return value;
-          }
-        }
-      }
-      return NEVER;
+    private String getExternalName() {
+      int i = ArrayUtil.indexOf(EXTERNAL_NAMES, Pair.create(null, this), (pair1, pair2) -> pair1.second == pair2.second);
+      return EXTERNAL_NAMES[i].first;
     }
   }
 

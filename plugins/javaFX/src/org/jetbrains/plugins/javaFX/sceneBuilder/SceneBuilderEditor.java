@@ -188,7 +188,7 @@ public class SceneBuilderEditor extends UserDataHolderBase implements FileEditor
     myLayout.show(myPanel, ERROR_CARD);
   }
 
-  private void downloadJavaFxDependencies(String... coordinates) {
+  private void downloadJavaFxDependencies() {
     for (String coordinate : SceneBuilderUtil.JAVAFX_ARTIFACTS) {
       RepositoryLibraryProperties libraryProperties =
         new RepositoryLibraryProperties("org.openjfx:" + coordinate + ":" + SceneBuilderUtil.JAVAFX_VERSION, true);
@@ -301,7 +301,7 @@ public class SceneBuilderEditor extends UserDataHolderBase implements FileEditor
   @NotNull
   @Override
   public String getName() {
-    return "Scene Builder";
+    return JavaFXBundle.message("scene.builder.editor.tab.name");
   }
 
   @Override
@@ -326,6 +326,11 @@ public class SceneBuilderEditor extends UserDataHolderBase implements FileEditor
   @Override
   public boolean isModified() {
     return false;
+  }
+
+  @Override
+  public @Nullable VirtualFile getFile() {
+    return myFile;
   }
 
   @Override

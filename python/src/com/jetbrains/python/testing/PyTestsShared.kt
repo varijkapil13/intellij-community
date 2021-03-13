@@ -1,15 +1,14 @@
 // Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.jetbrains.python.testing
 
-import com.intellij.execution.ExecutionException
-import com.intellij.execution.Location
-import com.intellij.execution.PsiLocation
-import com.intellij.execution.RunnerAndConfigurationSettings
+import com.intellij.execution.*
 import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.actions.ConfigurationFromContext
 import com.intellij.execution.configurations.*
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.testframework.AbstractTestProxy
+import com.intellij.execution.testframework.sm.runner.SMRunnerConsolePropertiesProvider
+import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties
 import com.intellij.execution.testframework.sm.runner.SMTestLocator
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.extensions.ExtensionNotApplicableException
@@ -35,10 +34,6 @@ import com.intellij.remote.PathMappingProvider
 import com.intellij.remote.RemoteSdkAdditionalData
 import com.intellij.util.ThreeState
 import com.jetbrains.extensions.*
-import com.jetbrains.extensions.ModuleBasedContextAnchor
-import com.jetbrains.extensions.QNameResolveContext
-import com.jetbrains.extensions.getElementAndResolvableName
-import com.jetbrains.extensions.resolveToElement
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.PyNames
 import com.jetbrains.python.psi.PyFile
@@ -304,8 +299,7 @@ data class ConfigurationTarget(@ConfigField("runcfg.python_tests.config.target")
     }
 
   private fun getArgumentsForPythonTarget(configuration: PyAbstractTestConfiguration): List<String> = runReadAction ra@{
-    val element = asPsiElement(configuration) ?: throw ExecutionException(
-      "Can't resolve $target. Try to remove configuration and generate it again")
+    val element = asPsiElement(configuration) ?: throw ExecutionException(PyBundle.message("python.testing.cant.resolve", target))
 
     if (element is PsiDirectory) {
       // Directory is special case: we can't run it as package for now, so we run it as path
@@ -320,8 +314,7 @@ data class ConfigurationTarget(@ConfigField("runcfg.python_tests.config.target")
       allowInaccurateResult = true
     )
     val qualifiedNameParts = QualifiedName.fromDottedString(target.trim()).tryResolveAndSplit(qNameResolveContext)
-                             ?: throw ExecutionException("Can't find file where $target declared. " +
-                                                         "Make sure it is in project root")
+                             ?: throw ExecutionException(PyBundle.message("python.testing.cant.find.where.declared", target))
 
     // We can't provide element qname here: it may point to parent class in case of inherited functions,
     // so we make fix file part, but obey element(symbol) part of qname
@@ -340,7 +333,7 @@ data class ConfigurationTarget(@ConfigField("runcfg.python_tests.config.target")
       }
       // Use "full" (path from closest root) otherwise
       val name = (element.containingFile as? PyFile)?.getQName()?.append(qualifiedNameParts.elementName) ?: throw ExecutionException(
-        "Can't get importable name for ${element.containingFile}. Is it a python file in project?")
+        PyBundle.message("python.testing.cant.get.importable.name", element.containingFile))
 
       return@ra listOf("--target", name.toString())
     }
@@ -422,7 +415,13 @@ abstract class PyAbstractTestConfiguration(project: Project,
                                            configurationFactory: ConfigurationFactory,
                                            private val runnerName: String)
   : AbstractPythonTestRunConfiguration<PyAbstractTestConfiguration>(project, configurationFactory), PyRerunAwareConfiguration,
-    RefactoringListenerProvider {
+    RefactoringListenerProvider, SMRunnerConsolePropertiesProvider {
+
+  override fun createTestConsoleProperties(executor: Executor): SMTRunnerConsoleProperties =
+    PythonTRunnerConsoleProperties(this, executor, true, PyTestsLocator).also {properties ->
+      if (isIdTestBased) properties.makeIdTestBased()
+    }
+
 
   /**
    * Args after it passed to test runner itself
@@ -553,10 +552,10 @@ abstract class PyAbstractTestConfiguration(project: Project,
     when (target.targetType) {
       PyRunTargetVariant.PATH -> {
         val name = target.asVirtualFile()?.name
-        "$testFrameworkName in " + (name ?: target.target)
+        PyBundle.message("runcfg.test.suggest.name.in.path", testFrameworkName, (name ?: target.target))
       }
       PyRunTargetVariant.PYTHON -> {
-        "$testFrameworkName for " + target.target
+        PyBundle.message("runcfg.test.suggest.name.in.python", testFrameworkName, target.target)
       }
       else -> {
         testFrameworkName

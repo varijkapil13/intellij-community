@@ -92,7 +92,7 @@ public final class MoveFilesOrDirectoriesUtil {
                             final PsiElement[] elements,
                             final PsiElement[] targetElement,
                             final MoveCallback moveCallback,
-                            final Function<PsiElement[], PsiElement[]> adjustElements) {
+                            final Function<? super PsiElement[], ? extends PsiElement[]> adjustElements) {
     if (adjustElements == null) {
       for (PsiElement element : elements) {
         if (!(element instanceof PsiFile) && !(element instanceof PsiDirectory)) {
@@ -144,7 +144,8 @@ public final class MoveFilesOrDirectoriesUtil {
         for (PsiElement psiElement : adjustedElements) {
           if (psiElement instanceof PsiFile) {
             PsiFile file = (PsiFile)psiElement;
-            if (CopyFilesOrDirectoriesHandler.checkFileExist(targetDirectory, choice, file, file.getName(), "Move")) continue;
+            if (CopyFilesOrDirectoriesHandler.checkFileExist(targetDirectory, choice, file, file.getName(),
+                                                             RefactoringBundle.message("command.name.move"))) continue;
           }
           checkMove(psiElement, targetDirectory);
           els.add(psiElement);

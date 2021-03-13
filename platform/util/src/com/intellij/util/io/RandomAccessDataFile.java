@@ -1,15 +1,13 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
-/*
- * @author max
- */
 package com.intellij.util.io;
 
 import com.intellij.openapi.Forceable;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -21,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class RandomAccessDataFile implements Forceable, Closeable {
   private static final Logger LOG = Logger.getInstance(RandomAccessDataFile.class);
 
-  private static final OpenChannelsCache ourCache = new OpenChannelsCache(150,
+  private static final OpenChannelsCache ourCache = new OpenChannelsCache(10,
                                                                           EnumSet.of(StandardOpenOption.READ,
                                                                                      StandardOpenOption.WRITE,
                                                                                      StandardOpenOption.CREATE));
@@ -82,7 +80,7 @@ public final class RandomAccessDataFile implements Forceable, Closeable {
   }
 
   private <T> T useFileChannel(@NotNull OpenChannelsCache.ChannelProcessor<T> channelConsumer) throws IOException {
-    return ourCache.useChannel(myFile, channelConsumer);
+    return ourCache.useChannel(myFile, channelConsumer, false);
   }
 
   public void putInt(long addr, int value) {

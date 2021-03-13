@@ -3,6 +3,9 @@ package com.intellij.internal.statistic.envTest.upload
 
 import com.intellij.internal.statistic.envTest.ApacheContainer
 import com.intellij.internal.statistic.eventLog.*
+import com.intellij.internal.statistic.eventLog.connection.EventLogSendListener
+import com.intellij.internal.statistic.eventLog.connection.EventLogStatisticsService
+import com.intellij.internal.statistic.eventLog.connection.EventLogUploadSettingsService
 import java.io.File
 import java.nio.file.Path
 
@@ -37,8 +40,9 @@ internal fun newSendService(container: ApacheContainer,
                             settingsResponseFile: String = SETTINGS_ROOT,
                             sendEnabled: Boolean = true): EventLogStatisticsService {
   val applicationInfo = TestEventLogApplicationInfo(RECORDER_ID, container.getBaseUrl(settingsResponseFile).toString())
+  val config = EventLogConfiguration.getOrCreate(RECORDER_ID)
   return EventLogStatisticsService(
-    DeviceConfiguration(EventLogConfiguration.deviceId, EventLogConfiguration.bucket),
+    DeviceConfiguration(config.deviceId, config.bucket),
     TestEventLogRecorderConfig(RECORDER_ID, logFiles, sendEnabled),
     EventLogSendListener { _, _, _ -> Unit },
     EventLogUploadSettingsService(RECORDER_ID, applicationInfo)

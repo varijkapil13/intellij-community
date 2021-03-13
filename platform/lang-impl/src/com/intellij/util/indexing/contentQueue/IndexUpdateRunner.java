@@ -8,6 +8,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.WrappedProgressIndicator;
 import com.intellij.openapi.progress.impl.ProgressSuspender;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
@@ -20,7 +21,6 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.indexing.FileBasedIndexImpl;
 import com.intellij.util.indexing.diagnostic.FileIndexingStatistics;
 import com.intellij.util.indexing.diagnostic.IndexingJobStatistics;
-import com.intellij.util.indexing.diagnostic.TooLargeForIndexingFile;
 import com.intellij.util.progress.SubTaskProgressIndicator;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -90,14 +90,18 @@ public final class IndexUpdateRunner {
 
   @NotNull
   public IndexingJobStatistics indexFiles(@NotNull Project project,
+                                          @NotNull String fileSetName,
                                           @NotNull Collection<VirtualFile> files,
                                           @NotNull ProgressIndicator indicator) throws IndexingInterruptedException {
-    IndexingJobStatistics statistics = new IndexingJobStatistics();
+    IndexingJobStatistics statistics = new IndexingJobStatistics(project, fileSetName);
+    long startTime = System.nanoTime();
     try {
       doIndexFiles(project, files, indicator, statistics);
     }
     catch (RuntimeException e) {
       throw new IndexingInterruptedException(e, statistics);
+    } finally {
+      statistics.setTotalIndexingTime(System.nanoTime() - startTime);
     }
     return statistics;
   }
@@ -106,6 +110,9 @@ public final class IndexUpdateRunner {
                             @NotNull Collection<VirtualFile> files,
                             @NotNull ProgressIndicator indicator,
                             @NotNull IndexingJobStatistics statistics) {
+    if (files.isEmpty()) {
+      return;
+    }
     indicator.checkCanceled();
     indicator.setIndeterminate(false);
 
@@ -139,7 +146,8 @@ public final class IndexUpdateRunner {
           // Internally checks for suspension of the indexing and blocks the current thread if necessary.
           indicator.checkCanceled();
           // Add workers if the previous have stopped for whatever reason.
-          while (numberOfRunningWorkers.get() < myNumberOfIndexingThreads) {
+          int toAddWorkersNumber = myNumberOfIndexingThreads - numberOfRunningWorkers.get();
+          for (int i = 0; i < toAddWorkersNumber; i++) {
             myIndexingExecutor.execute(worker);
             numberOfRunningWorkers.incrementAndGet();
           }
@@ -216,8 +224,9 @@ public final class IndexUpdateRunner {
     }
     catch (TooLargeContentException e) {
       indexingJob.oneMoreFileProcessed();
-      indexingJob.myStatistics.getNumberOfTooLargeForIndexingFiles().incrementAndGet();
-      indexingJob.myStatistics.getTooLargeForIndexingFiles().addElement(new TooLargeForIndexingFile(e.getFile().getName(), e.getFile().getLength()));
+      synchronized (indexingJob.myStatistics) {
+        indexingJob.myStatistics.addTooLargeForIndexingFile(e.getFile());
+      }
       FileBasedIndexImpl.LOG.info("File: " + e.getFile().getUrl() + " is too large for indexing");
       return;
     }
@@ -244,7 +253,13 @@ public final class IndexUpdateRunner {
           .expireWith(indexingJob.myProject)
           .wrapProgress(indexingJob.myIndicator)
           .executeSynchronously();
-        indexingJob.myStatistics.addFileStatistics(fileIndexingStatistics, contentLoadingTime, loadingResult.fileLength);
+        synchronized (indexingJob.myStatistics) {
+          indexingJob.myStatistics.addFileStatistics(file,
+                                                     fileIndexingStatistics,
+                                                     contentLoadingTime,
+                                                     loadingResult.fileLength
+          );
+        }
       }
       indexingJob.oneMoreFileProcessed();
     }
@@ -379,7 +394,7 @@ public final class IndexUpdateRunner {
   }
 
   @NotNull
-  public static String getPresentableLocationBeingIndexed(@NotNull Project project, @NotNull VirtualFile file) {
+  public static @NlsSafe String getPresentableLocationBeingIndexed(@NotNull Project project, @NotNull VirtualFile file) {
     VirtualFile actualFile = file;
     if (actualFile.getFileSystem() instanceof ArchiveFileSystem) {
       actualFile = VfsUtil.getLocalFile(actualFile);

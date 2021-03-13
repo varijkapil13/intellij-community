@@ -7,27 +7,24 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.actions.diff.ChangeDiffRequestProducer;
-import com.intellij.openapi.vcs.changes.ui.ChangeDiffRequestChain;
-import com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode;
-import com.intellij.openapi.vcs.changes.ui.TreeModelBuilder;
-import com.intellij.openapi.vcs.changes.ui.VcsTreeModelData;
+import com.intellij.openapi.vcs.changes.ui.*;
 import com.intellij.openapi.vcs.changes.ui.browser.ChangesFilterer;
 import com.intellij.openapi.vcs.changes.ui.browser.FilterableChangesBrowser;
 import com.intellij.openapi.vcs.history.VcsDiffUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.ui.ComponentUtil;
-import com.intellij.ui.GuiUtils;
-import com.intellij.ui.IdeBorderFactory;
-import com.intellij.ui.SideBorder;
+import com.intellij.ui.*;
 import com.intellij.ui.components.panels.Wrapper;
+import com.intellij.ui.switcher.QuickActionProvider;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
@@ -42,7 +39,6 @@ import com.intellij.vcs.log.impl.MergedChange;
 import com.intellij.vcs.log.impl.MergedChangeDiffRequestProvider;
 import com.intellij.vcs.log.impl.VcsLogUiProperties;
 import com.intellij.vcs.log.ui.VcsLogActionPlaces;
-import com.intellij.vcs.log.util.VcsLogUiUtil;
 import com.intellij.vcs.log.util.VcsLogUtil;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import org.jetbrains.annotations.Nls;
@@ -66,7 +62,6 @@ import static com.intellij.vcs.log.impl.MainVcsLogUiProperties.SHOW_ONLY_AFFECTE
  */
 public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
   @NotNull public static final DataKey<Boolean> HAS_AFFECTED_FILES = DataKey.create("VcsLogChangesBrowser.HasAffectedFiles");
-  @NotNull private final Project myProject;
   @NotNull private final MainVcsLogUiProperties myUiProperties;
   @NotNull private final Function<? super CommitId, ? extends VcsShortCommitDetails> myDataGetter;
 
@@ -86,7 +81,6 @@ public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
                        @NotNull Function<? super CommitId, ? extends VcsShortCommitDetails> getter,
                        @NotNull Disposable parent) {
     super(project, false, false);
-    myProject = project;
     myUiProperties = uiProperties;
     myDataGetter = getter;
 
@@ -232,17 +226,19 @@ public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
     else if (!myChangesToParents.isEmpty()) {
       emptyText.setText(VcsLogBundle.message("vcs.log.changes.no.merge.conflicts.status")).
         appendSecondaryText(VcsLogBundle.message("vcs.log.changes.show.changes.to.parents.status.action"),
-                            VcsLogUiUtil.getLinkAttributes(),
+                            SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES,
                             e -> myUiProperties.set(SHOW_CHANGES_FROM_PARENTS, true));
     }
     else if (isShowOnlyAffectedSelected() && myAffectedPaths != null) {
       emptyText.setText(VcsLogBundle.message("vcs.log.changes.no.changes.that.affect.selected.paths.status"))
-        .appendSecondaryText(VcsLogBundle.message("vcs.log.changes.show.all.paths.status.action"), VcsLogUiUtil.getLinkAttributes(),
+        .appendSecondaryText(VcsLogBundle.message("vcs.log.changes.show.all.paths.status.action"),
+                             SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES,
                              e -> myUiProperties.set(SHOW_ONLY_AFFECTED_CHANGES, false));
     }
     else if (!myHasMergeCommits && hasActiveChangesFilter()) {
       emptyText.setText(VcsLogBundle.message("vcs.log.changes.no.changes.that.affect.selected.filters.status"))
-        .appendSecondaryText(VcsLogBundle.message("vcs.log.changes.show.all.changes.status.action"), VcsLogUiUtil.getLinkAttributes(),
+        .appendSecondaryText(VcsLogBundle.message("vcs.log.changes.show.all.changes.status.action"),
+                             SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES,
                              e -> clearActiveChangesFilter());
     }
     else {
@@ -328,6 +324,24 @@ public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
     else if (HAS_AFFECTED_FILES.is(dataId)) {
       return myAffectedPaths != null;
     }
+    else if (QuickActionProvider.KEY.is(dataId)) {
+      return new QuickActionProvider() {
+        @Override
+        public @NotNull List<AnAction> getActions(boolean originalProvider) {
+          return SimpleToolWindowPanel.collectActions(VcsLogChangesBrowser.this);
+        }
+
+        @Override
+        public JComponent getComponent() {
+          return VcsLogChangesBrowser.this;
+        }
+
+        @Override
+        public @NlsActions.ActionText @Nullable String getName() {
+          return null;
+        }
+      };
+    }
     return super.getData(dataId);
   }
 
@@ -408,7 +422,7 @@ public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
     context.put(VCS_DIFF_LEFT_CONTENT_TITLE, getRevisionTitle(leftRevision, leftFile, centerFile == null ? rightFile : centerFile));
   }
 
-  private class ChangesBrowserParentNode extends ChangesBrowserNode<String> {
+  private class ChangesBrowserParentNode extends ChangesBrowserStringNode {
     protected ChangesBrowserParentNode(@NotNull CommitId commitId) {
       super(getText(commitId));
     }
@@ -434,11 +448,11 @@ public final class VcsLogChangesBrowser extends FilterableChangesBrowser {
     void onModelUpdated();
   }
 
-  private static class RootTag {
-    @NotNull private final Hash myCommit;
-    @NotNull private final String myText;
+  private static class RootTag implements ChangesBrowserNode.Tag {
+    private final @NotNull Hash myCommit;
+    private final @NotNull @Nls String myText;
 
-    RootTag(@NotNull Hash commit, @NotNull String text) {
+    RootTag(@NotNull Hash commit, @NotNull @Nls String text) {
       myCommit = commit;
       myText = text;
     }

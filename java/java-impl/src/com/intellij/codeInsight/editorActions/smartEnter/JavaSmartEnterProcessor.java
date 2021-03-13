@@ -27,7 +27,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
-import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
@@ -281,11 +281,13 @@ public class JavaSmartEnterProcessor extends SmartEnterProcessor {
     if (atCaret instanceof PsiWhiteSpace) return null;
     if (atCaret instanceof PsiJavaToken && "}".equals(atCaret.getText())) {
       atCaret = atCaret.getParent();
-      if (!(atCaret instanceof PsiAnonymousClass ||
-            atCaret instanceof PsiArrayInitializerExpression ||
-            psiElement(PsiCodeBlock.class).withParent(PsiLambdaExpression.class).accepts(atCaret))) {
-        return null;
-      }
+      boolean expressionEndingWithBrace = atCaret instanceof PsiAnonymousClass ||
+                                          atCaret instanceof PsiArrayInitializerExpression ||
+                                          atCaret instanceof PsiCodeBlock && (
+                                            atCaret.getParent() instanceof PsiLambdaExpression ||
+                                            atCaret.getParent() instanceof PsiSwitchExpression
+                                          );
+      if (!expressionEndingWithBrace) return null;
     }
 
     for (PsiElement each : SyntaxTraverser.psiApi().parents(atCaret).skip(1)) {
@@ -360,7 +362,7 @@ public class JavaSmartEnterProcessor extends SmartEnterProcessor {
   }
 
   protected static void plainEnter(@NotNull final Editor editor) {
-    getEnterHandler().execute(editor, editor.getCaretModel().getCurrentCaret(), ((EditorEx) editor).getDataContext());
+    getEnterHandler().execute(editor, editor.getCaretModel().getCurrentCaret(), EditorUtil.getEditorDataContext(editor));
   }
 
   protected static EditorActionHandler getEnterHandler() {

@@ -68,6 +68,7 @@ public class DependencyResolverImpl implements DependencyResolver {
    */
   @SuppressWarnings("unused")
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public DependencyResolverImpl(@NotNull Project project,
                                 boolean isPreview,
                                 boolean downloadJavadoc,
@@ -265,8 +266,9 @@ public class DependencyResolverImpl implements DependencyResolver {
           }
 
           ProjectComponentIdentifier projectComponentIdentifier = (ProjectComponentIdentifier)artifact.getId().getComponentIdentifier();
+          String buildName = projectComponentIdentifier.getBuild().getName();
           String projectPath = projectComponentIdentifier.getProjectPath();
-          String key = projectPath + "_" + resolvedDependency.getConfiguration();
+          String key = buildName + "_" + projectPath + "_" + resolvedDependency.getConfiguration();
           DefaultExternalProjectDependency projectDependency = resolvedProjectDependencies.get(key);
           if (projectDependency != null) {
             Set<File> projectDependencyArtifacts = new LinkedHashSet<File>(projectDependency.getProjectDependencyArtifacts());
@@ -482,11 +484,9 @@ public class DependencyResolverImpl implements DependencyResolver {
     Collection<ExternalDependency> result = new ArrayList<ExternalDependency>(2);
     List<File> files = new ArrayList<File>(sourceSetOutput.getClassesDirs().getFiles());
     files.add(sourceSetOutput.getResourcesDir());
-    if (!files.isEmpty()) {
-      DefaultFileCollectionDependency fileCollectionDependency = new DefaultFileCollectionDependency(files);
-      fileCollectionDependency.setScope(scope);
-      result.add(fileCollectionDependency);
-    }
+    DefaultFileCollectionDependency fileCollectionDependency = new DefaultFileCollectionDependency(files);
+    fileCollectionDependency.setScope(scope);
+    result.add(fileCollectionDependency);
 
     if (scope == RUNTIME_SCOPE) {
       ExternalDependency outputDirsRuntimeFileDependency = resolveSourceSetOutputDirsRuntimeFileDependency(sourceSetOutput);

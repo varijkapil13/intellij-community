@@ -4,7 +4,7 @@ package com.intellij.coverage;
 import com.intellij.CommonBundle;
 import com.intellij.codeEditor.printing.ExportToHTMLSettings;
 import com.intellij.codeInsight.TestFrameworks;
-import com.intellij.coverage.listeners.CoverageListener;
+import com.intellij.coverage.listeners.java.CoverageListener;
 import com.intellij.coverage.view.CoverageViewExtension;
 import com.intellij.coverage.view.CoverageViewManager;
 import com.intellij.coverage.view.JavaCoverageViewExtension;
@@ -51,6 +51,7 @@ import com.intellij.rt.coverage.data.LineData;
 import com.intellij.rt.coverage.data.SwitchData;
 import com.intellij.testIntegration.TestFramework;
 import jetbrains.coverage.report.ReportGenerationFailedException;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
@@ -72,7 +73,7 @@ public class JavaCoverageEngine extends CoverageEngine {
   }
 
   @Override
-  public boolean isApplicableTo(@Nullable final RunConfigurationBase conf) {
+  public boolean isApplicableTo(@NotNull final RunConfigurationBase conf) {
     if (conf instanceof CommonJavaRunConfigurationParameters) {
       return true;
     }
@@ -85,7 +86,7 @@ public class JavaCoverageEngine extends CoverageEngine {
   }
 
   @Override
-  public boolean canHavePerTestCoverage(@Nullable RunConfigurationBase conf) {
+  public boolean canHavePerTestCoverage(@NotNull RunConfigurationBase conf) {
     return !(conf instanceof ApplicationConfiguration) && conf instanceof CommonJavaRunConfigurationParameters;
   }
 
@@ -207,7 +208,7 @@ public class JavaCoverageEngine extends CoverageEngine {
 
   @NotNull
   @Override
-  public CoverageEnabledConfiguration createCoverageEnabledConfiguration(@Nullable final RunConfigurationBase conf) {
+  public CoverageEnabledConfiguration createCoverageEnabledConfiguration(@NotNull final RunConfigurationBase conf) {
     return new JavaCoverageEnabledConfiguration(conf, this);
   }
 
@@ -517,24 +518,24 @@ public class JavaCoverageEngine extends CoverageEngine {
       int hits = 0;
       final String indent = "    ";
       if (lineData.getJumps() != null) {
-        for (Object o : lineData.getJumps()) {
-          final JumpData jumpData = (JumpData)o;
+        for (JumpData jumpData : lineData.getJumps()) {
           if (jumpData.getTrueHits() + jumpData.getFalseHits() > 0) {
             final PsiExpression expression = expressions.get(idx++);
             final PsiElement parentExpression = expression.getParent();
             boolean reverse = parentExpression instanceof PsiPolyadicExpression && ((PsiPolyadicExpression)parentExpression).getOperationTokenType() == JavaTokenType.OROR
                               || parentExpression instanceof PsiDoWhileStatement || parentExpression instanceof PsiAssertStatement;
             buf.append(indent).append(expression.getText()).append("\n");
-            buf.append(indent).append(indent).append(PsiKeyword.TRUE).append(" ").append(CoverageBundle.message("hits.message", reverse ? jumpData.getFalseHits() : jumpData.getTrueHits())).append("\n");
-            buf.append(indent).append(indent).append(PsiKeyword.FALSE).append(" ").append(CoverageBundle.message("hits.message", reverse ? jumpData.getTrueHits() : jumpData.getFalseHits())).append("\n");
+            buf.append(indent).append(indent).append(PsiKeyword.TRUE).append(" ").append(CoverageBundle.message("hits.message", reverse ? jumpData.getFalseHits() : jumpData
+              .getTrueHits())).append("\n");
+            buf.append(indent).append(indent).append(PsiKeyword.FALSE).append(" ").append(CoverageBundle.message("hits.message", reverse ? jumpData
+              .getTrueHits() : jumpData.getFalseHits())).append("\n");
             hits += jumpData.getTrueHits() + jumpData.getFalseHits();
           }
         }
       }
 
       if (lineData.getSwitches() != null) {
-        for (Object o : lineData.getSwitches()) {
-          final SwitchData switchData = (SwitchData)o;
+        for (SwitchData switchData : lineData.getSwitches()) {
           final PsiExpression conditionExpression = expressions.get(idx++);
           buf.append(indent).append(conditionExpression.getText()).append("\n");
           int i = 0;
@@ -695,7 +696,7 @@ public class JavaCoverageEngine extends CoverageEngine {
   }
 
   @Override
-  public String getPresentableText() {
+  public @Nls String getPresentableText() {
     return JavaCoverageBundle.message("java.coverage.engine.presentable.text");
   }
 

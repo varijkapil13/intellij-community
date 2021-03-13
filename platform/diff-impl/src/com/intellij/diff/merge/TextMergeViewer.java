@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.diff.merge;
 
 import com.intellij.diff.DiffContext;
@@ -31,6 +31,7 @@ import com.intellij.diff.tools.util.text.MergeInnerDifferences;
 import com.intellij.diff.tools.util.text.TextDiffProviderBase;
 import com.intellij.diff.util.*;
 import com.intellij.icons.AllIcons;
+import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
@@ -66,9 +67,15 @@ import com.intellij.openapi.vcs.ex.SimpleLineStatusTracker;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.Alarm;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.annotations.RequiresWriteLock;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.TIntArrayList;
-import org.jetbrains.annotations.*;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -263,9 +270,9 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
     protected List<AnAction> createToolbarActions() {
       List<AnAction> group = new ArrayList<>();
 
-      DefaultActionGroup diffGroup = DefaultActionGroup.createPopupGroup(() -> DiffBundle.message("group.compare.contents.text"));
+      DefaultActionGroup diffGroup = DefaultActionGroup.createPopupGroup(() -> ActionsBundle.message("group.compare.contents.text"));
       diffGroup.getTemplatePresentation().setIcon(AllIcons.Actions.Diff);
-      diffGroup.add(Separator.create(DiffBundle.message("group.compare.contents.text")));
+      diffGroup.add(Separator.create(ActionsBundle.message("group.compare.contents.text")));
       diffGroup.add(new TextShowPartialDiffAction(PartialDiffMode.LEFT_MIDDLE, true));
       diffGroup.add(new TextShowPartialDiffAction(PartialDiffMode.RIGHT_MIDDLE, true));
       diffGroup.add(new TextShowPartialDiffAction(PartialDiffMode.LEFT_RIGHT, true));
@@ -398,7 +405,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
     }
 
     @Override
-    @CalledInAwt
+    @RequiresEdt
     public void rediff(boolean trySync) {
       if (myInitialRediffStarted) return;
       myInitialRediffStarted = true;
@@ -412,7 +419,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       throw new UnsupportedOperationException();
     }
 
-    @CalledInAwt
+    @RequiresEdt
     private void doRediff() {
       myStatusPanel.setBusy(true);
       myInnerDiffWorker.disable();
@@ -423,7 +430,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       myLoadingPanel.startLoading();
       myAcceptResolveAction.setEnabled(false);
 
-      BackgroundTaskUtil.executeAndTryWait(indicator -> BackgroundTaskUtil.runUnderDisposeAwareIndicator(this, () -> {
+      BackgroundTaskUtil.executeAndTryWait(indicator -> BackgroundTaskUtil.<Runnable>runUnderDisposeAwareIndicator(this, () -> {
         try {
           return doPerformRediff(indicator);
         }
@@ -476,7 +483,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       }
     }
 
-    @CalledInAwt
+    @RequiresEdt
     private void apply(@NotNull List<? extends MergeLineFragment> fragments,
                        @NotNull List<? extends MergeConflictType> conflictTypes,
                        @Nullable FoldingModelSupport.Data foldingState,
@@ -530,7 +537,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
     }
 
     @Override
-    @CalledInAwt
+    @RequiresEdt
     protected void destroyChangedBlocks() {
       super.destroyChangedBlocks();
       myInnerDiffWorker.stop();
@@ -555,12 +562,12 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
 
       private boolean myEnabled = false;
 
-      @CalledInAwt
+      @RequiresEdt
       public void scheduleRediff(@NotNull TextMergeChange change) {
         scheduleRediff(Collections.singletonList(change));
       }
 
-      @CalledInAwt
+      @RequiresEdt
       public void scheduleRediff(@NotNull Collection<? extends TextMergeChange> changes) {
         if (!myEnabled) return;
 
@@ -568,7 +575,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         schedule();
       }
 
-      @CalledInAwt
+      @RequiresEdt
       public void onSettingsChanged() {
         boolean enabled = myTextDiffProvider.getHighlightPolicy() == HighlightPolicy.BY_WORD;
         if (myEnabled == enabled) return;
@@ -577,14 +584,14 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         rebuildEverything();
       }
 
-      @CalledInAwt
+      @RequiresEdt
       public void onEverythingChanged() {
         myEnabled = myTextDiffProvider.getHighlightPolicy() == HighlightPolicy.BY_WORD;
 
         rebuildEverything();
       }
 
-      @CalledInAwt
+      @RequiresEdt
       public void disable() {
         myEnabled = false;
         stop();
@@ -607,7 +614,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         }
       }
 
-      @CalledInAwt
+      @RequiresEdt
       public void stop() {
         if (myProgress != null) myProgress.cancel();
         myProgress = null;
@@ -615,7 +622,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         myAlarm.cancelAllRequests();
       }
 
-      @CalledInAwt
+      @RequiresEdt
       private void putChanges(@NotNull Collection<? extends TextMergeChange> changes) {
         for (TextMergeChange change : changes) {
           if (change.isResolved()) continue;
@@ -623,7 +630,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         }
       }
 
-      @CalledInAwt
+      @RequiresEdt
       private void schedule() {
         if (myProgress != null) return;
         if (myScheduled.isEmpty()) return;
@@ -632,7 +639,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
         myAlarm.addRequest(() -> launchRediff(false), ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS);
       }
 
-      @CalledInAwt
+      @RequiresEdt
       private void launchRediff(boolean trySync) {
         myStatusPanel.setBusy(true);
 
@@ -651,7 +658,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       }
 
       @NotNull
-      @CalledInBackground
+      @RequiresBackgroundThread
       private Runnable performRediff(@NotNull final List<? extends TextMergeChange> scheduled,
                                      @NotNull final List<? extends InnerChunkData> data,
                                      @NotNull final ProgressIndicator indicator) {
@@ -684,7 +691,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
     //
 
     @Override
-    @CalledInAwt
+    @RequiresEdt
     protected void onBeforeDocumentChange(@NotNull DocumentEvent e) {
       super.onBeforeDocumentChange(e);
       if (myInitialRediffFinished) myContentModified = true;
@@ -769,9 +776,9 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
                                        @NotNull Runnable task) {
       myContentModified = true;
 
-      TIntArrayList affectedIndexes = null;
+      IntList affectedIndexes = null;
       if (affected != null) {
-        affectedIndexes = new TIntArrayList(affected.size());
+        affectedIndexes = new IntArrayList(affected.size());
         for (TextMergeChange change : affected) {
           affectedIndexes.add(change.getIndex());
         }
@@ -786,7 +793,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       return executeMergeCommand(commandName, false, affected, task);
     }
 
-    @CalledInAwt
+    @RequiresEdt
     public void markChangeResolved(@NotNull TextMergeChange change) {
       if (change.isResolved()) return;
       change.setResolved(Side.LEFT, true);
@@ -796,7 +803,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       myModel.invalidateHighlighters(change.getIndex());
     }
 
-    @CalledInAwt
+    @RequiresEdt
     public void markChangeResolved(@NotNull TextMergeChange change, @NotNull Side side) {
       if (change.isResolved(side)) return;
       change.setResolved(side, true);
@@ -814,7 +821,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       }
     }
 
-    @CalledWithWriteLock
+    @RequiresWriteLock
     public void replaceChange(@NotNull TextMergeChange change, @NotNull Side side, boolean resolveChange) {
       if (change.isResolved(side)) return;
       if (!change.isChange(side)) {
@@ -1039,7 +1046,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
       }
 
       @NotNull
-      @CalledInAwt
+      @RequiresEdt
       private List<TextMergeChange> getSelectedChanges(@NotNull ThreeSide side) {
         EditorEx editor = getEditor(side);
         BitSet lines = DiffUtil.getSelectedLines(editor);
@@ -1060,7 +1067,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
 
       protected abstract boolean isEnabled(@NotNull TextMergeChange change);
 
-      @CalledWithWriteLock
+      @RequiresWriteLock
       protected abstract void apply(@NotNull ThreeSide side, @NotNull List<? extends TextMergeChange> changes);
     }
 
@@ -1311,7 +1318,7 @@ public class TextMergeViewer implements MergeTool.MergeViewer {
           boolean isResolved = mergeChange.isResolved(mySide);
           if (!handler.processResolvable(mergeChange.getStartLine(left), mergeChange.getEndLine(left),
                                          mergeChange.getStartLine(right), mergeChange.getEndLine(right),
-                                         getEditor(), mergeChange.getDiffType(), isResolved)) {
+                                         mergeChange.getDiffType(), isResolved)) {
             return;
           }
         }

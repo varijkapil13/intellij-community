@@ -18,13 +18,10 @@ package com.siyeh.ig.psiutils;
 import com.intellij.codeInspection.concurrencyAnnotations.JCiPUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.light.LightElement;
-import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.searches.DirectClassInheritorsSearch;
 import com.intellij.psi.search.searches.MethodReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.Query;
 import com.intellij.util.containers.ContainerUtil;
@@ -88,6 +85,7 @@ public final class ClassUtils {
     immutableTypes.add("java.util.Locale");
     immutableTypes.add("java.util.UUID");
     immutableTypes.add("java.util.regex.Pattern");
+    immutableTypes.add("java.time.ZoneOffset");
   }
 
   private ClassUtils() {}
@@ -146,8 +144,16 @@ public final class ClassUtils {
       return true;
     }
     final String qualifiedName = aClass.getQualifiedName();
-    return qualifiedName != null &&
-           (immutableTypes.contains(qualifiedName) || qualifiedName.startsWith("com.google.common.collect.Immutable"));
+    if (qualifiedName != null &&
+        (immutableTypes.contains(qualifiedName) || qualifiedName.startsWith("com.google.common.collect.Immutable"))) {
+      return true;
+    }
+
+    return aClass.hasModifierProperty(PsiModifier.FINAL) &&
+           Arrays.stream(aClass.getAllFields())
+             .filter(field -> !field.hasModifierProperty(PsiModifier.STATIC))
+             .map(field -> field.getType())
+             .allMatch(type -> TypeConversionUtil.isPrimitiveAndNotNull(type) || immutableTypes.contains(type.getCanonicalText()));
   }
 
   public static boolean inSamePackage(@Nullable PsiElement element1, @Nullable PsiElement element2) {
@@ -332,46 +338,15 @@ public final class ClassUtils {
         return false;
       }
       // has at least on accessible instance method
-      return Arrays.stream(aClass.getMethods())
-        .anyMatch(m -> !m.isConstructor() && !m.hasModifierProperty(PsiModifier.PRIVATE) && !m.hasModifierProperty(PsiModifier.STATIC));
+      return ContainerUtil.exists(aClass.getMethods(), m -> !m.isConstructor() &&
+                                                            !m.hasModifierProperty(PsiModifier.PRIVATE) &&
+                                                            !m.hasModifierProperty(PsiModifier.STATIC));
     }
     if (getIfOnlyInvisibleConstructors(aClass).length == 0) {
       return false;
     }
     final PsiField selfInstance = getIfOneStaticSelfInstance(aClass);
     return selfInstance != null && newOnlyAssignsToStaticSelfInstance(getIfOnlyInvisibleConstructors(aClass)[0], selfInstance);
-  }
-
-  /**
-   * Removes exChild class reference from permits list of a parent.
-   * If this was the last element in permits list then sealed modifier of parent class is removed.
-   */
-  public static void removeFromPermitsList(@NotNull PsiClass parent, @NotNull PsiClass exChild) {
-    PsiReferenceList permitsList = parent.getPermitsList();
-    if (permitsList == null) return;
-    PsiJavaCodeReferenceElement[] childRefs = permitsList.getReferenceElements();
-    PsiJavaCodeReferenceElement exChildRef = ContainerUtil.find(childRefs, ref -> ref.resolve() == exChild);
-    if (exChildRef == null) return;
-    exChildRef.delete();
-    if (childRefs.length != 1) return;
-    PsiModifierList modifiers = parent.getModifierList();
-    if (modifiers == null) return;
-    modifiers.setModifierProperty(PsiModifier.SEALED, false);
-  }
-
-  public static Collection<String> findSameFileInheritors(@NotNull PsiClass psiClass, PsiClass @NotNull ... classesToExclude) {
-    GlobalSearchScope fileScope = GlobalSearchScope.fileScope(psiClass.getContainingFile());
-    return DirectClassInheritorsSearch.search(psiClass, fileScope)
-      .filtering(inheritor -> !ArrayUtil.contains(inheritor, classesToExclude))
-      .mapping(inheritor -> inheritor.getQualifiedName())
-      .findAll();
-  }
-
-  public static boolean hasSealedParent(@NotNull PsiClass psiClass) {
-    return StreamEx.of(psiClass.getExtendsListTypes())
-      .append(psiClass.getImplementsListTypes())
-      .map(r -> r.resolve())
-      .anyMatch(parent -> parent != null && parent.hasModifierProperty(PsiModifier.SEALED));
   }
 
   private static PsiField getIfOneStaticSelfInstance(PsiClass aClass) {
@@ -469,5 +444,18 @@ public final class ClassUtils {
     public boolean isNewOnlyAssignedToField() {
       return newOnlyAssignedToField;
     }
+  }
+
+  /**
+   * For use with property files.
+   * <code>{0, choice, 1#class|2#interface|3#anonymous class extending|4#annotation type|5#enum|6#record}</code>
+   */
+  public static int getTypeOrdinal(PsiClass aClass) {
+    if (aClass instanceof PsiAnonymousClass) return 3;
+    if (aClass.isAnnotationType()) return 4;
+    if (aClass.isInterface()) return 2;
+    if (aClass.isEnum()) return 5;
+    if (aClass.isRecord()) return 6;
+    return 1;
   }
 }

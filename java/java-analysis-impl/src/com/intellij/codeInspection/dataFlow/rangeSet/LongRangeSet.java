@@ -5,14 +5,15 @@ import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInspection.dataFlow.value.RelationType;
 import com.intellij.java.analysis.JavaAnalysisBundle;
 import com.intellij.openapi.util.NlsSafe;
-import com.intellij.psi.*;
-import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.MathUtil;
 import com.intellij.util.ThreeState;
 import one.util.streamex.IntStreamEx;
 import one.util.streamex.StreamEx;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -167,67 +168,7 @@ public abstract class LongRangeSet {
 
   public abstract @Nls String getPresentationText(PsiType type);
 
-  /**
-   * Performs a supported binary operation from token (defined in {@link JavaTokenType}).
-   *
-   * @param token  a token which corresponds to the operation
-   * @param right  a right-hand operand
-   * @param isLong true if operation should be performed on long types (otherwise int is assumed)
-   * @return the resulting LongRangeSet which covers possible results of the operation (probably including some more elements);
-   * or null if the supplied token is not supported.
-   */
-  @Contract("null, _, _ -> null")
-  @Nullable
-  public final LongRangeSet binOpFromToken(IElementType token, LongRangeSet right, boolean isLong) {
-    if (token == null) return null;
-    if (token.equals(JavaTokenType.PLUS)) {
-      return plus(right, isLong);
-    }
-    if (token.equals(JavaTokenType.MINUS)) {
-      return minus(right, isLong);
-    }
-    if (token.equals(JavaTokenType.AND)) {
-      return bitwiseAnd(right);
-    }
-    if (token.equals(JavaTokenType.OR)) {
-      return bitwiseOr(right, isLong);
-    }
-    if (token.equals(JavaTokenType.XOR)) {
-      return bitwiseXor(right, isLong);
-    }
-    if (token.equals(JavaTokenType.PERC)) {
-      return mod(right);
-    }
-    if (token.equals(JavaTokenType.DIV)) {
-      return div(right, isLong);
-    }
-    if (token.equals(JavaTokenType.LTLT)) {
-      return shiftLeft(right, isLong);
-    }
-    if (token.equals(JavaTokenType.GTGT)) {
-      return shiftRight(right, isLong);
-    }
-    if (token.equals(JavaTokenType.GTGTGT)) {
-      return unsignedShiftRight(right, isLong);
-    }
-    if (token.equals(JavaTokenType.ASTERISK)) {
-      return mul(right, isLong);
-    }
-    return null;
-  }
-
-  @Nullable
-  public LongRangeSet wideBinOpFromToken(@NotNull IElementType token, @NotNull LongRangeSet other, boolean isLong) {
-    if (token.equals(JavaTokenType.PLUS) || token.equals(JavaTokenType.MINUS)) {
-      return plusWiden(token.equals(JavaTokenType.MINUS) ? other.negate(isLong) : other, isLong);
-    }
-    if (token.equals(JavaTokenType.ASTERISK)) {
-      return mulWiden(other, isLong);
-    }
-    return null;
-  }
-
-  private LongRangeSet mulWiden(LongRangeSet other, boolean isLong) {
+  @NotNull LongRangeSet mulWiden(LongRangeSet other, boolean isLong) {
     if (Point.ZERO.equals(this)) return this;
     if (Point.ZERO.equals(other)) return other;
     if (Point.ONE.equals(this)) return other;
@@ -235,10 +176,10 @@ public abstract class LongRangeSet {
     if (Point.ZERO.equals(this.mod(point(2))) || Point.ZERO.equals(other.mod(point(2)))) {
       return modRange(minValue(isLong), maxValue(isLong), 2, 1);
     }
-    return null;
+    return isLong ? Range.LONG_RANGE : Range.INT_RANGE;
   }
 
-  private LongRangeSet plusWiden(LongRangeSet other, boolean isLong) {
+  @NotNull LongRangeSet plusWiden(LongRangeSet other, boolean isLong) {
     if (this instanceof Point && other instanceof Point) {
       long val1 = ((Point)this).myValue;
       long val2 = ((Point)other).myValue;
@@ -253,7 +194,7 @@ public abstract class LongRangeSet {
         constVal = this;
         mod = 1 << (Math.min(6, tzb2));
       }
-      if (mod < 2) return null;
+      if (mod < 2) return isLong ? Range.LONG_RANGE : Range.INT_RANGE;
       return modRange(minValue(isLong), maxValue(isLong), mod, 1).plus(constVal, isLong);
     }
     if (this instanceof Point && other instanceof ModRange) {
@@ -280,7 +221,7 @@ public abstract class LongRangeSet {
     if (other instanceof Point && this instanceof ModRange) {
       return other.plusWiden(this, isLong);
     }
-    return null;
+    return isLong ? Range.LONG_RANGE : Range.INT_RANGE;
   }
 
   public abstract boolean isCardinalityBigger(long cutoff);
@@ -390,8 +331,17 @@ public abstract class LongRangeSet {
     }
     return result;
   }
-  
-  abstract public LongRangeSet mul(LongRangeSet multiplier, boolean isLong);
+
+  public LongRangeSet mul(LongRangeSet multiplier, boolean isLong) {
+    if (multiplier.isEmpty()) return multiplier;
+    if (multiplier instanceof Point) return multiplier.mul(this, isLong);
+    BitString thisMask = getBitwiseMask();
+    BitString thatMask = multiplier.getBitwiseMask();
+    int numZeros = Math.min(6,
+                            Math.min(Long.numberOfTrailingZeros(thisMask.myBits), Long.numberOfTrailingZeros(~thisMask.myMask)) +
+                            Math.min(Long.numberOfTrailingZeros(thatMask.myBits), Long.numberOfTrailingZeros(~thatMask.myMask)));
+    return modRange(isLong ? Long.MIN_VALUE : Integer.MIN_VALUE, isLong ? Long.MAX_VALUE : Integer.MAX_VALUE, 1L << numZeros, 1L);
+  }
 
   BitString getBitwiseMask() {
     if (isEmpty()) {
@@ -430,12 +380,22 @@ public abstract class LongRangeSet {
   }
 
   /**
+   * Checks whether addition of this and other range may overflow
+   * @param other range to add to this range
+   * @param isLong whether addition should be performed on long values (otherwise int is assumed)
+   * @return true if result may overflow, false if it never overflows
+   */
+  public boolean additionMayOverflow(@NotNull LongRangeSet other, boolean isLong) {
+    return subtractionMayOverflow(other.negate(isLong), isLong);
+  }
+
+  /**
    * Checks whether subtraction of this and other range may overflow
    * @param other range to subtract from this range
    * @param isLong whether subtraction should be performed on long values (otherwise int is assumed)
    * @return true if result may overflow, false if it never overflows
    */
-  public boolean subtractionMayOverflow(LongRangeSet other, boolean isLong) {
+  public boolean subtractionMayOverflow(@NotNull LongRangeSet other, boolean isLong) {
     long leftMin = min();
     long leftMax = max();
     long rightMin = other.min();
@@ -897,7 +857,7 @@ public abstract class LongRangeSet {
       return range(ranges[0], ranges[1]);
     }
     else {
-      return new RangeSet(Arrays.copyOfRange(ranges, 0, bound));
+      return new RangeSet(Arrays.copyOf(ranges, bound));
     }
   }
 
@@ -1254,6 +1214,13 @@ public abstract class LongRangeSet {
       }
       if (abs < 0 || (abs > Long.SIZE && Long.bitCount(abs) == 1)) {
         abs = Long.SIZE;
+      }
+      if (multiplier instanceof ModRange && ((ModRange)multiplier).myBits == 1 && abs < Long.SIZE) {
+        int mod = ((ModRange)multiplier).myMod;
+        abs *= overflow ? Long.lowestOneBit(mod) : mod;
+        if (abs < 0 || (abs > Long.SIZE && Long.bitCount(abs) == 1)) {
+          abs = Long.SIZE;
+        }
       }
       return modRange(result.min(), result.max(), abs, 1L);
     }
@@ -1612,13 +1579,6 @@ public abstract class LongRangeSet {
       return result;
     }
 
-    @Override
-    public LongRangeSet mul(LongRangeSet multiplier, boolean isLong) {
-      if (multiplier.isEmpty()) return multiplier;
-      if (multiplier instanceof Point) return multiplier.mul(this, isLong);
-      return isLong ? LONG_RANGE : INT_RANGE;
-    }
-
     @NotNull
     private static LongRangeSet plus(long from1, long to1, long from2, long to2, boolean isLong) {
       long len1 = to1 - from1; // may overflow
@@ -1759,6 +1719,24 @@ public abstract class LongRangeSet {
 
     @Override
     public @NotNull LongRangeSet subtract(@NotNull LongRangeSet other) {
+      if (other instanceof Point) {
+        Point p = (Point)other;
+        if (p.myValue == myFrom) {
+          return modRange(myFrom + 1, myTo, myMod, myBits);
+        }
+        if (p.myValue == myTo) {
+          return modRange(myFrom, myTo - 1, myMod, myBits);
+        }
+      }
+      if (other instanceof Range && !(other instanceof ModRange)) {
+        Range r = (Range)other;
+        if (r.myFrom <= myFrom && r.myTo >= myFrom && r.myTo < myTo) {
+          return modRange(r.myTo + 1, myTo, myMod, myBits);
+        }
+        if (r.myFrom > myFrom && r.myFrom <= myTo && r.myTo >= myTo) {
+          return modRange(myFrom, r.myFrom - 1, myMod, myBits);
+        }
+      }
       return super.subtract(other);
     }
 
@@ -1891,21 +1869,21 @@ public abstract class LongRangeSet {
           other instanceof ModRange && ((ModRange)other).myMod == myMod && Long.bitCount(((ModRange)other).myBits) == 1) {
         long[] ranges = set.asRanges();
         LongRangeSet result = empty();
+        int bit = other instanceof Point ? remainder(((Point)other).myValue, myMod) : Long.numberOfTrailingZeros(((ModRange)other).myBits);
+        long bits = rotateRemainders(myBits, myMod, myMod - bit);
         for (int i = 0; i < ranges.length; i += 2) {
-          result = result.unite(plus(ranges[i], ranges[i + 1], other, isLong));
+          LongRangeSet plus;
+          if (Integer.bitCount(myMod) == 1 || !additionMayOverflow(other, isLong)) {
+            plus = modRange(ranges[i], ranges[i + 1], myMod, bits);
+          }
+          else {
+            plus = range(ranges[i], ranges[i + 1]);
+          }
+          result = result.unite(plus);
         }
         return result;
       }
       return set;
-    }
-
-    private LongRangeSet plus(long min, long max, LongRangeSet other, boolean isLong) {
-      if (Integer.bitCount(myMod) == 1 || !subtractionMayOverflow(other.negate(isLong), isLong)) {
-        int bit = other instanceof Point ? remainder(((Point)other).myValue, myMod) : Long.numberOfTrailingZeros(((ModRange)other).myBits);
-        long bits = rotateRemainders(myBits, myMod, myMod - bit);
-        return modRange(min, max, myMod, bits);
-      }
-      return range(min, max);
     }
 
     @NotNull
@@ -1958,6 +1936,7 @@ public abstract class LongRangeSet {
         suffix = JavaAnalysisBundle.message("long.range.set.presentation.divisible.by", myMod);
       }
       else {
+        //noinspection HardCodedStringLiteral
         suffix = IntStreamEx.of(BitSet.valueOf(new long[]{myBits})).joining(", ", "<", "> mod " + myMod);
       }
       return suffix;
@@ -2227,13 +2206,6 @@ public abstract class LongRangeSet {
         result = result.unite(range(myRanges[i], myRanges[i + 1]).plus(other, isLong));
       }
       return result;
-    }
-
-    @Override
-    public LongRangeSet mul(LongRangeSet multiplier, boolean isLong) {
-      if (multiplier.isEmpty()) return multiplier;
-      if (multiplier instanceof Point) return multiplier.mul(this, isLong);
-      return isLong ? Range.LONG_RANGE : Range.INT_RANGE;
     }
 
     @NotNull

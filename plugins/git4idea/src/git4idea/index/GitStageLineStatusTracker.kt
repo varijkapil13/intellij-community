@@ -13,10 +13,11 @@ import com.intellij.diff.util.*
 import com.intellij.ide.GeneralSettings
 import com.intellij.ide.lightEdit.LightEditCompatible
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.WriteThread
 import com.intellij.openapi.diff.DiffBundle
 import com.intellij.openapi.diff.LineStatusMarkerDrawUtil
 import com.intellij.openapi.editor.Document
@@ -26,31 +27,31 @@ import com.intellij.openapi.editor.markup.MarkupEditorFilter
 import com.intellij.openapi.editor.markup.MarkupEditorFilterFactory
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.progress.util.BackgroundTaskUtil
+import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.VerticalSeparatorComponent
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vcs.ex.*
 import com.intellij.openapi.vcs.ex.Range
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.EditorTextField
-import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.panels.VerticalLayout
-import com.intellij.ui.paint.LinePainter2D
+import com.intellij.ui.components.labels.LinkLabel
 import com.intellij.ui.scale.JBUIScale
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.containers.PeekableIteratorWrapper
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import git4idea.GitUtil
 import git4idea.i18n.GitBundle
-import git4idea.index.actions.GitAddOperation
-import git4idea.index.actions.GitResetOperation
-import org.jetbrains.annotations.CalledInAwt
+import org.jetbrains.annotations.Nls
+import org.jetbrains.annotations.NonNls
 import java.awt.*
 import java.util.*
-import javax.swing.BorderFactory
-import javax.swing.JComponent
-import javax.swing.JPanel
+import javax.swing.*
 import kotlin.math.max
 
 class GitStageLineStatusTracker(
@@ -59,12 +60,14 @@ class GitStageLineStatusTracker(
   override val document: Document
 ) : LocalLineStatusTracker<StagedRange> {
   override val vcsDocument: Document = LineStatusTrackerBase.createVcsDocument(document)
-  private var stagedDocument: Document = LineStatusTrackerBase.createVcsDocument(document)
+  var stagedDocument: Document = LineStatusTrackerBase.createVcsDocument(document)
+    private set
 
   override val disposable: Disposable = Disposer.newDisposable()
   private val LOCK: DocumentTracker.Lock = DocumentTracker.Lock()
 
   private val blockOperations: LineStatusTrackerBlockOperations<StagedRange, StagedRange> = MyBlockOperations(LOCK)
+  private val stagedBlockOperations: LineStatusTrackerBlockOperations<Range, BlockI> = MyStagedBlockOperations(LOCK)
   private val stagedTracker: DocumentTracker
   private val unstagedTracker: DocumentTracker
 
@@ -86,12 +89,12 @@ class GitStageLineStatusTracker(
     unstagedTracker = DocumentTracker(stagedDocument, document, LOCK)
     Disposer.register(disposable, unstagedTracker)
 
-    stagedTracker.addHandler(MyDocumentTrackerHandler(true))
-    unstagedTracker.addHandler(MyDocumentTrackerHandler(false))
+    stagedTracker.addHandler(MyDocumentTrackerHandler(false))
+    unstagedTracker.addHandler(MyDocumentTrackerHandler(true))
   }
 
 
-  @CalledInAwt
+  @RequiresEdt
   fun setBaseRevision(vcsContent: CharSequence, newStagedDocument: Document) {
     ApplicationManager.getApplication().assertIsDispatchThread()
     if (isReleased) return
@@ -114,7 +117,7 @@ class GitStageLineStatusTracker(
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   fun dropBaseRevision() {
     ApplicationManager.getApplication().assertIsDispatchThread()
     if (isReleased) return
@@ -132,14 +135,14 @@ class GitStageLineStatusTracker(
     }
 
     if (!ApplicationManager.getApplication().isDispatchThread || LOCK.isHeldByCurrentThread) {
-      WriteThread.submit(runnable)
+      ApplicationManager.getApplication().invokeLater(runnable)
     }
     else {
       runnable.run()
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun updateDocument(side: ThreeSide, commandName: String?, task: (Document) -> Unit): Boolean {
     val affectedDocument = side.selectNotNull(vcsDocument, stagedDocument, document)
     return LineStatusTrackerBase.updateDocument(project, affectedDocument, commandName, task)
@@ -180,6 +183,8 @@ class GitStageLineStatusTracker(
   override fun transferLineFromVcs(line: Int, approximate: Boolean): Int = blockOperations.transferLineFromVcs(line, approximate)
   override fun transferLineToVcs(line: Int, approximate: Boolean): Int = blockOperations.transferLineToVcs(line, approximate)
 
+  fun transferLineFromLocalToStaged(line: Int, approximate: Boolean): Int = stagedBlockOperations.transferLineToVcs(line, approximate)
+  fun transferLineFromStagedToLocal(line: Int, approximate: Boolean): Int = stagedBlockOperations.transferLineFromVcs(line, approximate)
 
   override fun scrollAndShowHint(range: Range, editor: Editor) {
     renderer.scrollAndShow(editor, range)
@@ -228,7 +233,7 @@ class GitStageLineStatusTracker(
     runBulkRollback(toRevert)
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun runBulkRollback(toRevert: List<StagedRange>) {
     if (!isValid()) return
 
@@ -238,12 +243,12 @@ class GitStageLineStatusTracker(
     }
   }
 
-  private fun stageChanges(range: Range) {
+  fun stageChanges(range: Range) {
     val newRange = blockOperations.findBlock(range) ?: return
     runBulkStage(listOf(newRange))
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun runBulkStage(toRevert: List<StagedRange>) {
     if (!isValid()) return
 
@@ -253,12 +258,12 @@ class GitStageLineStatusTracker(
     }
   }
 
-  private fun unstageChanges(range: Range) {
+  fun unstageChanges(range: Range) {
     val newRange = blockOperations.findBlock(range) ?: return
     runBulkUnstage(listOf(newRange))
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun runBulkUnstage(toRevert: List<StagedRange>) {
     if (!isValid()) return
 
@@ -323,7 +328,7 @@ class GitStageLineStatusTracker(
       updateHighlighters()
     }
 
-    @CalledInAwt
+    @RequiresEdt
     private fun fireFileUnchanged(documentToSave: Document) {
       if (GeneralSettings.getInstance().isSaveOnFrameDeactivation) {
         // later to avoid saving inside document change event processing and deadlock with CLM.
@@ -356,54 +361,88 @@ class GitStageLineStatusTracker(
     }
 
     private fun paintStageLines(g: Graphics2D, editor: Editor, block: List<ChangedLines<StageLineFlags>>) {
-      val stripeThickness = JBUIScale.scale(2)
+      val borderColor = LineStatusMarkerDrawUtil.getGutterBorderColor(editor)
 
-      editor as EditorImpl
       val area = LineStatusMarkerDrawUtil.getGutterArea(editor)
       val x = area.first
       val endX = area.second
+      val midX = (endX + x + 3) / 2
+
+      val y = block.first().y1
+      val endY = block.last().y2
 
       for (change in block) {
-        if (change.line1 != change.line2) {
-          val start = editor.visualLineToY(change.line1)
-          val end = editor.visualLineToY(change.line2)
+        if (change.y1 != change.y2 &&
+            change.flags.isUnstaged) {
+          val start = change.y1
+          val end = change.y2
           val gutterColor = LineStatusMarkerDrawUtil.getGutterColor(change.type, editor)
 
-          LineStatusMarkerDrawUtil.paintRect(g, gutterColor, null, x, start, endX, end)
-          if (change.flags.isUnstaged) {
-            paintThickLine(g, JBColor.RED, x, start, end, stripeThickness)
-          }
           if (change.flags.isStaged) {
-            paintThickLine(g, JBColor.GREEN, endX - stripeThickness, start, end, stripeThickness)
+            LineStatusMarkerDrawUtil.paintRect(g, gutterColor, null, x, start, midX, end)
+          }
+          else {
+            LineStatusMarkerDrawUtil.paintRect(g, gutterColor, null, x, start, endX, end)
           }
         }
       }
 
-      for (change in block) {
-        if (change.line1 == change.line2) {
-          val start = editor.visualLineToY(change.line1)
-          val gutterColor = LineStatusMarkerDrawUtil.getGutterColor(change.type, editor)
-          LineStatusMarkerDrawUtil.paintTriangle(g, editor, gutterColor, null, x, endX, start)
+      if (borderColor == null) {
+        for (change in block) {
+          if (change.y1 != change.y2 &&
+              change.flags.isStaged) {
+            val start = change.y1
+            val end = change.y2
+            val stagedBorderColor = LineStatusMarkerDrawUtil.getIgnoredGutterBorderColor(change.type, editor)
 
-          val editorScale = editor.scale
-          if (change.flags.isUnstaged) {
-            val size = JBUIScale.scale(4 * editorScale).toInt()
-            paintThickLine(g, JBColor.RED, x, start - size, start + size, stripeThickness)
+            LineStatusMarkerDrawUtil.paintRect(g, null, stagedBorderColor, x, start, endX, end)
           }
-          if (change.flags.isStaged) {
-            val size = JBUIScale.scale(2 * editorScale).toInt()
-            paintThickLine(g, JBColor.GREEN, endX - stripeThickness, start - size, start + size, stripeThickness)
+        }
+      }
+      else if (y != endY) {
+        LineStatusMarkerDrawUtil.paintRect(g, null, borderColor, x, y, endX, endY)
+      }
+
+      for (change in block) {
+        if (change.y1 == change.y2) {
+          val start = change.y1
+          val gutterColor = LineStatusMarkerDrawUtil.getGutterColor(change.type, editor)
+          val stagedBorderColor = borderColor ?: LineStatusMarkerDrawUtil.getIgnoredGutterBorderColor(change.type, editor)
+
+          if (change.flags.isUnstaged && change.flags.isStaged) {
+            paintStripeTriangle(g, editor, gutterColor, stagedBorderColor, x, endX, start)
+          }
+          else if (change.flags.isStaged) {
+            LineStatusMarkerDrawUtil.paintTriangle(g, editor, null, stagedBorderColor, x, endX, start)
+          }
+          else {
+            LineStatusMarkerDrawUtil.paintTriangle(g, editor, gutterColor, borderColor, x, endX, start)
           }
         }
       }
     }
 
-    private fun paintThickLine(g: Graphics2D, color: Color?, x: Int, y1: Int, y2: Int, thickness: Int) {
-      val oldStroke = g.stroke
-      g.stroke = BasicStroke(thickness.toFloat())
-      g.color = color
-      LinePainter2D.paint(g, x.toDouble(), y1.toDouble(), x.toDouble(), y2 - 1.toDouble())
-      g.stroke = oldStroke
+    private fun paintStripeTriangle(g: Graphics2D, editor: Editor, color: Color?, borderColor: Color?, x1: Int, x2: Int, y: Int) {
+      @Suppress("NAME_SHADOWING") var y = y
+      val editorScale = if (editor is EditorImpl) editor.scale else 1.0f
+      val size = JBUIScale.scale(5 * editorScale).toInt()
+      if (y < size) y = size
+      val xPoints = intArrayOf(x1, x1, x2)
+      val yPointsBorder = intArrayOf(y - size, y + size, y)
+      val yPointsFill = intArrayOf(y - size, y, y)
+
+      if (color != null) {
+        g.color = color
+        g.fillPolygon(xPoints, yPointsFill, xPoints.size)
+      }
+
+      if (borderColor != null) {
+        g.color = borderColor
+        val oldStroke = g.stroke
+        g.stroke = BasicStroke(JBUIScale.scale(1).toFloat())
+        g.drawPolygon(xPoints, yPointsBorder, xPoints.size)
+        g.stroke = oldStroke
+      }
     }
 
     class StageLineFlags(val isStaged: Boolean, val isUnstaged: Boolean)
@@ -417,6 +456,10 @@ class GitStageLineStatusTracker(
       override fun mergeFlags(flags1: StageLineFlags, flags2: StageLineFlags): StageLineFlags =
         StageLineFlags(flags1.isStaged || flags2.isStaged,
                        flags1.isUnstaged || flags2.isUnstaged)
+    }
+
+    override fun createAdditionalInfoPanel(editor: Editor, range: Range, mousePosition: Point?, disposable: Disposable): JComponent? {
+      return createStageLinksPanel(editor, range, mousePosition, disposable)
     }
 
     override fun showHintAt(editor: Editor, range: Range, mousePosition: Point?) {
@@ -440,20 +483,25 @@ class GitStageLineStatusTracker(
       val actions = createToolbarActions(editor, range, mousePosition)
       val toolbar = LineStatusMarkerPopupPanel.buildToolbar(editor, actions, disposable)
 
-      LineStatusMarkerPopupPanel.showPopupAt(editor, toolbar, editorsPanel, null, mousePosition, disposable)
+      val additionalPanel = createStageLinksPanel(editor, range, mousePosition, disposable)
+
+      LineStatusMarkerPopupPanel.showPopupAt(editor, toolbar, editorsPanel, additionalPanel, mousePosition, disposable, null)
     }
 
     fun createEditorComponent(editor: Editor, stagedTextField: EditorTextField, vcsTextField: EditorTextField): JComponent {
-      val editorsPanel = JPanel(VerticalLayout(0))
+      val stagedEditorPane = createEditorPane(editor, GitBundle.message("stage.content.staged"), stagedTextField, true)
+      val vcsEditorPane = createEditorPane(editor, GitUtil.HEAD, vcsTextField, false)
+
+      val editorsPanel = JPanel(StagePopupVerticalLayout())
+      editorsPanel.add(stagedEditorPane)
+      editorsPanel.add(vcsEditorPane)
       editorsPanel.background = LineStatusMarkerPopupPanel.getEditorBackgroundColor(editor)
-      editorsPanel.add(createEditorPane(editor, GitBundle.message("stage.content.staged"), stagedTextField, true))
-      editorsPanel.add(createEditorPane(editor, GitUtil.HEAD, vcsTextField, false))
       return editorsPanel
     }
 
-    private fun createEditorPane(editor: Editor, text: String, textField: EditorTextField, topBorder: Boolean): JComponent {
+    private fun createEditorPane(editor: Editor, @Nls text: String, textField: EditorTextField, topBorder: Boolean): JComponent {
       val label = JBLabel(text)
-      label.border = JBUI.Borders.emptyBottom(2);
+      label.border = JBUI.Borders.emptyBottom(2)
       label.font = UIUtil.getLabelFont(UIUtil.FontSize.SMALL)
       label.foreground = UIUtil.getLabelDisabledForeground()
 
@@ -587,45 +635,76 @@ class GitStageLineStatusTracker(
       }
     }
 
+    private fun createStageLinksPanel(editor: Editor,
+                                      range: Range,
+                                      mousePosition: Point?,
+                                      disposable: Disposable): JComponent? {
+      if (range !is StagedRange) return null
+
+      val panel = JPanel()
+      panel.layout = BoxLayout(panel, BoxLayout.X_AXIS)
+      panel.border = JBUI.Borders.emptyRight(10)
+      panel.isOpaque = false
+
+      panel.add(VerticalSeparatorComponent())
+      panel.add(Box.createHorizontalStrut(JBUI.scale(10)))
+
+      if (range.hasUnstaged) {
+        val stageLink = createStageLinkButton(editor, disposable, "Git.Stage.Add",
+                                              GitBundle.message("action.label.add.unstaged.range"),
+                                              GitBundle.message("action.label.add.unstaged.range.tooltip")) {
+          tracker.stageChanges(range)
+          reopenRange(editor, range, mousePosition)
+        }
+        panel.add(stageLink)
+      }
+
+      if (range.hasStaged) {
+        if (range.hasUnstaged) panel.add(Box.createHorizontalStrut(JBUI.scale(16)))
+
+        val unstageLink = createStageLinkButton(editor, disposable, "Git.Stage.Reset",
+                                                GitBundle.message("action.label.reset.staged.range"),
+                                                GitBundle.message("action.label.reset.staged.range.tooltip")) {
+          tracker.unstageChanges(range)
+          reopenRange(editor, range, mousePosition)
+        }
+        panel.add(unstageLink)
+      }
+
+      return panel
+    }
+
+    private fun createStageLinkButton(editor: Editor,
+                                      disposable: Disposable,
+                                      actionId: @NonNls String,
+                                      text: @Nls String,
+                                      tooltipText: @Nls String,
+                                      callback: () -> Unit): LinkLabel<*> {
+      val shortcut = ActionManager.getInstance().getAction(actionId).shortcutSet
+      val shortcuts = shortcut.shortcuts
+
+      val link = LinkLabel.create(text, callback)
+      link.toolTipText = DiffUtil.createTooltipText(tooltipText, StringUtil.nullize(KeymapUtil.getShortcutsText(shortcuts)))
+
+      if (shortcuts.isNotEmpty()) {
+        object : DumbAwareAction() {
+          override fun actionPerformed(e: AnActionEvent) {
+            link.doClick()
+          }
+        }.registerCustomShortcutSet(shortcut, editor.component, disposable)
+      }
+      return link
+    }
+
     override fun createToolbarActions(editor: Editor, range: Range, mousePosition: Point?): List<AnAction> {
       val actions = ArrayList<AnAction>()
       actions.add(ShowPrevChangeMarkerAction(editor, range))
       actions.add(ShowNextChangeMarkerAction(editor, range))
       actions.add(RollbackLineStatusRangeAction(editor, range))
-      actions.add(AddLineStatusRangeAction(editor, range))
-      actions.add(ResetLineStatusRangeAction(editor, range))
       actions.add(StageShowDiffAction(editor, range))
       actions.add(CopyLineStatusRangeAction(editor, range))
       actions.add(ToggleByWordDiffAction(editor, range, mousePosition))
       return actions
-    }
-
-    private inner class AddLineStatusRangeAction(editor: Editor, range: Range) :
-      RangeMarkerAction(editor, range, null), LightEditCompatible {
-      init {
-        templatePresentation.setText(GitAddOperation.actionText)
-        templatePresentation.icon = GitAddOperation.icon
-      }
-
-      override fun isEnabled(editor: Editor, range: Range): Boolean = (range as StagedRange).hasUnstaged
-
-      override fun actionPerformed(editor: Editor, range: Range) {
-        tracker.stageChanges(range)
-      }
-    }
-
-    private inner class ResetLineStatusRangeAction(editor: Editor, range: Range) :
-      RangeMarkerAction(editor, range, null), LightEditCompatible {
-      init {
-        templatePresentation.setText(GitResetOperation.actionText)
-        templatePresentation.icon = GitResetOperation.icon
-      }
-
-      override fun isEnabled(editor: Editor, range: Range): Boolean = (range as StagedRange).hasStaged
-
-      override fun actionPerformed(editor: Editor, range: Range) {
-        tracker.unstageChanges(range)
-      }
     }
 
     private inner class RollbackLineStatusRangeAction(editor: Editor, range: Range)
@@ -661,6 +740,9 @@ class GitStageLineStatusTracker(
           DiffBundle.message("dialog.title.diff.for.range"),
           vcsContent, stagedContent, currentContent,
           GitUtil.HEAD, GitBundle.message("stage.content.staged"), GitBundle.message("stage.content.local"))
+        request.putUserData(DiffUserDataKeysEx.VCS_DIFF_ACCEPT_RIGHT_TO_BASE_ACTION_TEXT, GitBundle.message("action.label.add.unstaged.range"))
+        request.putUserData(DiffUserDataKeysEx.VCS_DIFF_ACCEPT_BASE_TO_RIGHT_ACTION_TEXT, DiffBundle.message("action.presentation.diff.revert.text"))
+        request.putUserData(DiffUserDataKeysEx.VCS_DIFF_ACCEPT_LEFT_TO_BASE_ACTION_TEXT, GitBundle.message("action.label.reset.staged.range"))
         DiffManager.getInstance().showDiff(myTracker.project, request)
       }
 
@@ -679,6 +761,11 @@ class GitStageLineStatusTracker(
     override fun getBlocks(): List<StagedRange>? = if (isValid()) blocks else null
     override fun StagedRange.toRange(): StagedRange = this
   }
+
+  private inner class MyStagedBlockOperations(lock: DocumentTracker.Lock) : LineStatusTrackerBlockOperations<Range, BlockI>(lock) {
+    override fun getBlocks(): List<BlockI>? = if (isValid()) unstagedTracker.blocks else null
+    override fun BlockI.toRange(): Range = Range(start, end, vcsStart, vcsEnd)
+  }
 }
 
 class StagedRange(line1: Int, line2: Int,
@@ -692,7 +779,7 @@ class StagedRange(line1: Int, line2: Int,
   override val vcsEnd: Int get() = vcsLine2
   override val isEmpty: Boolean get() = line1 == line2 && stagedLine1 == stagedLine2 && vcsLine1 == vcsLine2
 
-  fun hasStagedLines() : Boolean = stagedLine1 != stagedLine2
+  fun hasStagedLines(): Boolean = stagedLine1 != stagedLine2
 }
 
 private class BlockMerger(private val staged: List<DocumentTracker.Block>,

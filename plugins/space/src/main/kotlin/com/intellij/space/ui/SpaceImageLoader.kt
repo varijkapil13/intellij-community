@@ -1,3 +1,4 @@
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.ui
 
 import circlet.platform.api.TID
@@ -7,14 +8,15 @@ import com.google.common.cache.CacheBuilder
 import com.intellij.execution.process.ProcessIOExecutorService
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
-import com.intellij.space.components.space
+import com.intellij.space.components.SpaceWorkspaceComponent
+import com.intellij.space.utils.LifetimedDisposable
+import com.intellij.space.utils.LifetimedDisposableImpl
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
-import libraries.coroutines.extra.LifetimeSource
 import libraries.coroutines.extra.async
 import runtime.async.backoff
 import java.awt.image.BufferedImage
@@ -23,23 +25,25 @@ import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 
 @Service
-class SpaceImageLoader {
+class SpaceImageLoader: LifetimedDisposable by LifetimedDisposableImpl() {
   private val coroutineDispatcher: ExecutorCoroutineDispatcher = ProcessIOExecutorService.INSTANCE.asCoroutineDispatcher()
 
   private val imageCache: Cache<TID, Deferred<BufferedImage?>> = CacheBuilder.newBuilder()
     .expireAfterAccess(5, TimeUnit.MINUTES)
-    .build<TID, Deferred<BufferedImage?>>()
+    .build()
 
-  private val lifetime = LifetimeSource()
 
   init {
-    space.workspace.forEach(lifetime) {
+    lifetime.add {
+      imageCache.cleanUp()
+    }
+    SpaceWorkspaceComponent.getInstance().workspace.forEach(lifetime) {
       imageCache.cleanUp()
     }
   }
 
   suspend fun loadImageAsync(imageTID: TID): Deferred<BufferedImage?>? {
-    val kCircletClient = space.workspace.value?.client ?: return null
+    val kCircletClient = SpaceWorkspaceComponent.getInstance().workspace.value?.client ?: return null
 
     val server: String = kCircletClient.server.removeSuffix("/")
     val imagesEndpoint = "${server}/d"

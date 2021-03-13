@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.ui;
 
 import com.intellij.openapi.Disposable;
@@ -6,6 +6,7 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextComponentAccessor;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.ui.components.JBCheckBox;
@@ -13,6 +14,8 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.ui.components.BorderLayoutPanel;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,26 +34,27 @@ public class VcsExecutablePathSelector {
   @NotNull private String myAutoDetectedPath = "";
 
   @Deprecated
-  public VcsExecutablePathSelector(@NotNull String vcsName, @NotNull Consumer<String> executableTester) {
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  public VcsExecutablePathSelector(@NotNull @Nls String vcsName, @NotNull Consumer<String> executableTester) {
     this(vcsName, null, (path) -> executableTester.accept(path));
   }
 
-  public VcsExecutablePathSelector(@NotNull String vcsName, @Nullable Disposable disposable, @NotNull ExecutableHandler handler) {
+  public VcsExecutablePathSelector(@NotNull @Nls String vcsName, @Nullable Disposable disposable, @NotNull ExecutableHandler handler) {
     BorderLayoutPanel panel = JBUI.Panels.simplePanel(UIUtil.DEFAULT_HGAP, 0);
 
     myPathSelector = new TextFieldWithBrowseButton(null, disposable);
-    myPathSelector.addBrowseFolderListener(VcsBundle.getString("executable.select.title"),
+    myPathSelector.addBrowseFolderListener(VcsBundle.message("executable.select.title"),
                                            null,
                                            null,
                                            FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(),
                                            new MyTextComponentAccessor(handler));
     panel.addToCenter(myPathSelector);
 
-    JButton testButton = new JButton(VcsBundle.getString("executable.test"));
+    JButton testButton = new JButton(VcsBundle.message("executable.test"));
     testButton.addActionListener(e -> handler.testExecutable(ObjectUtils.notNull(getCurrentPath(), myAutoDetectedPath)));
     panel.addToRight(testButton);
 
-    myProjectPathCheckbox = new JBCheckBox(VcsBundle.getString("executable.project.override"));
+    myProjectPathCheckbox = new JBCheckBox(VcsBundle.message("executable.project.override"));
     myProjectPathCheckbox.addActionListener(e -> handleProjectOverrideStateChanged());
 
     JLabel label = new JBLabel(VcsBundle.message("executable.select.label", vcsName));
@@ -76,10 +80,10 @@ public class VcsExecutablePathSelector {
     else if (!Objects.equals(getCurrentPath(), mySavedPath)) {
 
       switch (Messages.showYesNoCancelDialog(myMainPanel,
-                                             VcsBundle.getString("executable.project.override.reset.message"),
-                                             VcsBundle.getString("executable.project.override.reset.title"),
-                                             VcsBundle.getString("executable.project.override.reset.globalize"),
-                                             VcsBundle.getString("executable.project.override.reset.revert"),
+                                             VcsBundle.message("executable.project.override.reset.message"),
+                                             VcsBundle.message("executable.project.override.reset.title"),
+                                             VcsBundle.message("executable.project.override.reset.globalize"),
+                                             VcsBundle.message("executable.project.override.reset.revert"),
                                              Messages.getCancelButton(),
                                              null)) {
         case Messages.NO:
@@ -103,10 +107,10 @@ public class VcsExecutablePathSelector {
 
   public void reset(@Nullable String globalPath,
                     boolean pathOverriddenForProject,
-                    @Nullable String projectPath,
-                    @NotNull String autoDetectedPath) {
+                    @Nullable @NlsSafe String projectPath,
+                    @NotNull @NlsSafe String autoDetectedPath) {
     myAutoDetectedPath = autoDetectedPath;
-    ((JBTextField)myPathSelector.getTextField()).getEmptyText().setText(VcsBundle.message("settings.auto.detected") + myAutoDetectedPath);
+    ((JBTextField)myPathSelector.getTextField()).getEmptyText().setText(VcsBundle.message("settings.auto.detected") + autoDetectedPath);
 
     myProjectPathCheckbox.setSelected(pathOverriddenForProject);
     if (pathOverriddenForProject) {

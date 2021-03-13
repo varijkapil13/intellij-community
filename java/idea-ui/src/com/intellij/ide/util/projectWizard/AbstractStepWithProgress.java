@@ -19,6 +19,7 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.TestOnly;
 
@@ -57,7 +58,7 @@ public abstract class AbstractStepWithProgress<Result> extends ModuleWizardStep 
 
   protected abstract JComponent createResultsPanel();
 
-  protected abstract String getProgressText();
+  protected abstract @NlsContexts.ProgressText String getProgressText();
 
   protected abstract boolean shouldRunProgress();
 
@@ -76,7 +77,7 @@ public abstract class AbstractStepWithProgress<Result> extends ModuleWizardStep 
 
     myProgressLabel2 = new JLabel() {
           @Override
-          public void setText(String text) {
+          public void setText(@Nls String text) {
             super.setText(StringUtil.trimMiddle(text, 80));
           }
         };
@@ -129,7 +130,7 @@ public abstract class AbstractStepWithProgress<Result> extends ModuleWizardStep 
 
     if (ApplicationManager.getApplication().isUnitTestMode()) {
 
-      Result result = ProgressManager.getInstance().runProcess(() -> calculate(), progress);
+      Result result = ProgressManager.getInstance().runProcess(this::calculate, progress);
       onFinished(result, false);
       return;
     }

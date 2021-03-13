@@ -49,6 +49,7 @@ import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.extractMethod.InputVariables;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,13 +63,13 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler, Contex
    * @deprecated Use {@link #getRefactoringName()} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static final String REFACTORING_NAME = "Replace Code Duplicates";
   private static final Logger LOG = Logger.getInstance(MethodDuplicatesHandler.class);
 
   @Override
   public boolean isAvailableForQuickList(@NotNull Editor editor, @NotNull PsiFile file, @NotNull DataContext dataContext) {
-    final PsiElement element = file.findElementAt(editor.getCaretModel().getOffset());
-    return getCannotRefactorMessage(PsiTreeUtil.getParentOfType(element, PsiMember.class)) == null;
+    return false;
   }
 
   @Override
@@ -102,7 +103,7 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler, Contex
   }
 
   @Nullable
-  private static String getCannotRefactorMessage(PsiMember member) {
+  private static @NlsContexts.DialogMessage String getCannotRefactorMessage(PsiMember member) {
     if (member == null) {
       return JavaRefactoringBundle.message("locate.caret.inside.a.method");
     }
@@ -121,15 +122,15 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler, Contex
     } else if (member instanceof PsiField) {
       final PsiField field = (PsiField)member;
       if (field.getInitializer() == null) {
-        return "Field " + member.getName() + " doesn't have initializer";
+        return JavaRefactoringBundle.message("dialog.message.field.doesnt.have.initializer", member.getName());
       }
       final PsiClass containingClass = field.getContainingClass();
       if (!field.hasModifierProperty(PsiModifier.FINAL) || !field.hasModifierProperty(PsiModifier.STATIC) ||
           containingClass == null || containingClass.getQualifiedName() == null) {
-        return "Replace Duplicates works with constants only";
+        return JavaRefactoringBundle.message("dialog.message.replace.duplicates.works.with.constants.only");
       }
     } else {
-      return "Caret should be inside method or constant";
+      return JavaRefactoringBundle.message("dialog.message.caret.should.be.inside.method.or.constant");
     }
     return null;
   }
@@ -298,7 +299,7 @@ public class MethodDuplicatesHandler implements RefactoringActionHandler, Contex
                                 new ArrayList<>());
   }
 
-  private static @NotNull String getStatusMessage(final int duplicatesNo) {
+  private static @NlsContexts.StatusBarText @NotNull String getStatusMessage(final int duplicatesNo) {
     return JavaRefactoringBundle.message("method.duplicates.found.message", duplicatesNo);
   }
 

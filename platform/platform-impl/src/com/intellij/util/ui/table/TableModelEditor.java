@@ -4,6 +4,7 @@ package com.intellij.util.ui.table;
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -51,8 +52,8 @@ public class TableModelEditor<T> extends CollectionModelEditor<T, CollectionItem
 
     model = new MyListTableModel(columns, new ArrayList<>(items));
     table = new TableView<>(model);
+    table.setShowGrid(false);
     table.setDefaultEditor(Enum.class, ComboBoxTableCellEditor.INSTANCE);
-    table.setStriped(true);
     table.setEnableAntialiasing(true);
     table.setPreferredScrollableViewportSize(JBUI.size(200, -1));
     table.setVisibleRowCount(JBTable.PREFERRED_SCROLLABLE_VIEWPORT_HEIGHT_IN_ROWS);
@@ -60,6 +61,7 @@ public class TableModelEditor<T> extends CollectionModelEditor<T, CollectionItem
     ColumnInfo firstColumn = columns[0];
     if ((firstColumn.getColumnClass() == boolean.class || firstColumn.getColumnClass() == Boolean.class) && firstColumn.getName().isEmpty()) {
       TableUtil.setupCheckboxColumn(table.getColumnModel().getColumn(0), 0);
+      JBTable.setupCheckboxShortcut(table, 0);
     }
 
    boolean needTableHeader = false;
@@ -120,6 +122,10 @@ public class TableModelEditor<T> extends CollectionModelEditor<T, CollectionItem
     return this;
   }
 
+  public void setShowGrid(boolean v) {
+    table.setShowGrid(v);
+  }
+
   @NotNull
   public TableModelEditor<T> enabled(boolean value) {
     table.setEnabled(value);
@@ -146,7 +152,7 @@ public class TableModelEditor<T> extends CollectionModelEditor<T, CollectionItem
   }
 
   public interface DialogItemEditor<T> extends CollectionItemEditor<T> {
-    void edit(@NotNull T item, @NotNull Function<T, T> mutator, boolean isAdd);
+    void edit(@NotNull T item, @NotNull Function<? super T, ? extends T> mutator, boolean isAdd);
 
     void applyEdited(@NotNull T oldItem, @NotNull T newItem);
 
@@ -209,7 +215,7 @@ public class TableModelEditor<T> extends CollectionModelEditor<T, CollectionItem
   }
 
   public abstract static class EditableColumnInfo<Item, Aspect> extends ColumnInfo<Item, Aspect> {
-    public EditableColumnInfo(@NotNull String name) {
+    public EditableColumnInfo(@NotNull @NlsContexts.ColumnName String name) {
       super(name);
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
 import com.intellij.codeInsight.lookup.*;
@@ -26,7 +26,7 @@ import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
-import com.intellij.openapi.editor.ex.RangeHighlighterEx;
+import com.intellij.openapi.editor.ex.MarkupModelEx;
 import com.intellij.openapi.editor.impl.ImaginaryEditor;
 import com.intellij.openapi.editor.markup.*;
 import com.intellij.openapi.project.DumbService;
@@ -45,6 +45,7 @@ import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -74,6 +75,8 @@ public final class TemplateState extends TemplateStateBase implements Disposable
   @Nullable private PairProcessor<? super String, ? super String> myProcessor;
   private boolean mySelectionCalculated;
   private boolean myStarted;
+
+  public static final Key<Boolean> TEMPLATE_RANGE_HIGHLIGHTER_KEY = Key.create("TemplateState.rangeHighlighterKey");
 
   TemplateState(@NotNull Project project, @Nullable final Editor editor, @NotNull Document document,
                 @NotNull TemplateStateProcessor processor) {
@@ -132,14 +135,7 @@ public final class TemplateState extends TemplateStateBase implements Disposable
       @Override
       public void beforeCommandFinished(@NotNull CommandEvent event) {
         if (started && !isDisposed() && !isUndoOrRedoInProgress()) {
-          Runnable runnable = () -> afterChangedUpdate();
-          final LookupEx lookup = getEditor() != null ? LookupManager.getActiveLookup(getEditor()) : null;
-          if (lookup != null) {
-            lookup.performGuardedChange(runnable);
-          }
-          else {
-            runnable.run();
-          }
+          LookupUtil.performGuardedChange(getEditor(), () -> afterChangedUpdate());
         }
       }
     });
@@ -387,7 +383,7 @@ public final class TemplateState extends TemplateStateBase implements Disposable
 
   private void doReformat() {
     final Runnable action = () -> {
-      IntArrayList indices = initEmptyVariables();
+      IntList indices = initEmptyVariables();
       getSegments().setSegmentsGreedy(false);
       LOG.assertTrue(myTemplateRange.isValid(),
                      "template key: " + getTemplate().getKey() + "; " +
@@ -415,7 +411,7 @@ public final class TemplateState extends TemplateStateBase implements Disposable
     ApplicationManager.getApplication().runWriteAction(() -> {
       final PsiFile file = getPsiFile();
       if (file != null) {
-        IntArrayList indices = initEmptyVariables();
+        IntList indices = initEmptyVariables();
         getSegments().setSegmentsGreedy(false);
         for (TemplateOptionalProcessor processor : TemplateOptionalProcessor.EP_NAME.getExtensionList()) {
           processor.processText(myProject, getTemplate(), getDocument(), myTemplateRange, getEditor());
@@ -554,6 +550,11 @@ public final class TemplateState extends TemplateStateBase implements Disposable
   private void unblockDocument() {
     PsiDocumentManager.getInstance(myProject).commitDocument(getDocument());
     PsiDocumentManager.getInstance(myProject).doPostponedOperationsAndUnblockDocument(getDocument());
+  }
+
+  @ApiStatus.Internal
+  public void update() {
+    calcResults(false);
   }
 
   // Hours spent fixing code : 3.5
@@ -733,7 +734,7 @@ public final class TemplateState extends TemplateStateBase implements Disposable
     replaceString(StringUtil.notNullize(result.toString()), start, end, segmentNumber);
 
     if (result instanceof RecalculatableResult) {
-      IntArrayList indices = initEmptyVariables();
+      IntList indices = initEmptyVariables();
       shortenReferences();
       PsiDocumentManager.getInstance(myProject).commitDocument(getDocument());
       ((RecalculatableResult)result)
@@ -1038,11 +1039,11 @@ public final class TemplateState extends TemplateStateBase implements Disposable
     return items != null && items.length > 1;
   }
 
-  private IntArrayList initEmptyVariables() {
+  private IntList initEmptyVariables() {
     int endSegmentNumber = getTemplate().getEndSegmentNumber();
     int selStart = getTemplate().getSelectionStartSegmentNumber();
     int selEnd = getTemplate().getSelectionEndSegmentNumber();
-    IntArrayList indices = new IntArrayList();
+    IntList indices = new IntArrayList();
     List<TemplateDocumentChange> changes = new ArrayList<>();
     for (int i = 0; i < getTemplate().getSegmentsCount(); i++) {
       int length = getSegments().getSegmentEnd(i) - getSegments().getSegmentStart(i);
@@ -1087,28 +1088,30 @@ public final class TemplateState extends TemplateStateBase implements Disposable
 
   private RangeHighlighter getSegmentHighlighter(int segmentNumber, @Nullable Variable var, boolean isSelected, boolean isEnd) {
     boolean newStyle = Registry.is("live.templates.highlight.all.variables");
+    boolean mightStop = mightStopAtVariable(var, segmentNumber);
     TextAttributesKey attributesKey = isEnd ? null :
                                       isSelected ? EditorColors.LIVE_TEMPLATE_ATTRIBUTES :
-                                      newStyle && mightStopAtVariable(var, segmentNumber) ? EditorColors.LIVE_TEMPLATE_INACTIVE_SEGMENT :
+                                      newStyle && mightStop ? EditorColors.LIVE_TEMPLATE_INACTIVE_SEGMENT :
                                       null;
 
     int start = getSegments().getSegmentStart(segmentNumber);
     int end = getSegments().getSegmentEnd(segmentNumber);
-    RangeHighlighterEx segmentHighlighter = (RangeHighlighterEx)getEditor().getMarkupModel()
-      .addRangeHighlighter(attributesKey, start, end, HighlighterLayer.ELEMENT_UNDER_CARET - 1, HighlighterTargetArea.EXACT_RANGE);
-    segmentHighlighter.setGreedyToLeft(true);
-    segmentHighlighter.setGreedyToRight(true);
+    MarkupModelEx markupModel = (MarkupModelEx)getEditor().getMarkupModel();
+    return markupModel.addRangeHighlighterAndChangeAttributes(attributesKey, start, end, HighlighterLayer.ELEMENT_UNDER_CARET - 1,
+                                                              HighlighterTargetArea.EXACT_RANGE, false, segmentHighlighter -> {
+        segmentHighlighter.setGreedyToLeft(true);
+        segmentHighlighter.setGreedyToRight(true);
 
-    EditorColorsScheme scheme = getEditor().getColorsScheme();
-    TextAttributes attributes = segmentHighlighter.getTextAttributes(scheme);
-    if (attributes != null && attributes.getEffectType() == EffectType.BOXED && newStyle) {
-      TextAttributes clone = attributes.clone();
-      clone.setEffectType(EffectType.SLIGHTLY_WIDER_BOX);
-      clone.setBackgroundColor(scheme.getDefaultBackground());
-      segmentHighlighter.setTextAttributes(clone);
-    }
-
-    return segmentHighlighter;
+        EditorColorsScheme scheme = getEditor().getColorsScheme();
+        TextAttributes attributes = segmentHighlighter.getTextAttributes(scheme);
+        if (attributes != null && attributes.getEffectType() == EffectType.BOXED && newStyle) {
+          TextAttributes clone = attributes.clone();
+          clone.setEffectType(EffectType.SLIGHTLY_WIDER_BOX);
+          clone.setBackgroundColor(scheme.getDefaultBackground());
+          segmentHighlighter.setTextAttributes(clone);
+        }
+        segmentHighlighter.putUserData(TEMPLATE_RANGE_HIGHLIGHTER_KEY, mightStop);
+      });
   }
 
   private boolean mightStopAtVariable(@Nullable Variable var, int segmentNumber) {

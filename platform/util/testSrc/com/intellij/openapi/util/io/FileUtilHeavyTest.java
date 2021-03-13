@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.util.io;
 
 import com.github.marschall.memoryfilesystem.MemoryFileSystemBuilder;
@@ -12,13 +12,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileLock;
-import java.nio.file.FileSystem;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static com.intellij.openapi.util.io.IoTestUtil.assumeSymLinkCreationIsSupported;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
 
@@ -201,7 +200,7 @@ public class FileUtilHeavyTest {
 
   @Test
   public void testSymlinkDeletion() throws IOException {
-    IoTestUtil.assumeSymLinkCreationIsSupported();
+    assumeSymLinkCreationIsSupported();
 
     File targetDir = tempDir.newDirectory("target");
     File targetFile = tempDir.newFile("target/file");
@@ -243,7 +242,7 @@ public class FileUtilHeavyTest {
 
   @Test
   public void testRecursiveDeletionWithSymlink() throws IOException {
-    IoTestUtil.assumeSymLinkCreationIsSupported();
+    assumeSymLinkCreationIsSupported();
 
     File top = tempDir.newDirectory("top");
     tempDir.newFile("top/a-dir/file");
@@ -293,7 +292,7 @@ public class FileUtilHeavyTest {
 
   @Test
   public void testToCanonicalPathSymLinksAware() throws IOException {
-    IoTestUtil.assumeSymLinkCreationIsSupported();
+    assumeSymLinkCreationIsSupported();
 
     File rootDir = tempDir.newDirectory("root");
     tempDir.newDirectory("root/dir1/dir2/dir3/dir4");
@@ -398,5 +397,75 @@ public class FileUtilHeavyTest {
       assertEquals(StringUtil.trimTrailing(uncDir.toURI().toString(), '/'), FileUtil.fileToUri(uncDir).toString());
       assertEquals(uncDir, new File(FileUtil.fileToUri(uncDir)));
     }
+  }
+
+  @Test
+  public void createDirectories() throws IOException {
+    Path existingDir = tempDir.newDirectory("existing").toPath();
+    NioFiles.createDirectories(existingDir);
+
+    Path nonExisting = tempDir.getRoot().toPath().resolve("d1/d2/d3/non-existing");
+    NioFiles.createDirectories(nonExisting);
+    assertThat(nonExisting).isDirectory();
+
+    Path existingFile = tempDir.newFile("file").toPath();
+    try {
+      NioFiles.createDirectories(existingFile);
+      fail("`createDirectories()` over an existing file shall not pass");
+    }
+    catch (FileAlreadyExistsException ignored) { }
+    try {
+      NioFiles.createDirectories(existingFile.resolve("dir"));
+      fail("`createDirectories()` over an existing file shall not pass");
+    }
+    catch (FileAlreadyExistsException ignored) { }
+
+    assumeSymLinkCreationIsSupported();
+
+    Path endLink = tempDir.getRoot().toPath().resolve("end-link");
+    IoTestUtil.createSymbolicLink(endLink, existingDir);
+    NioFiles.createDirectories(endLink);
+    assertThat(endLink).isDirectory().isSymbolicLink();
+
+    Path middleLinkDir = endLink.resolve("d1/d2");
+    NioFiles.createDirectories(middleLinkDir);
+    assertThat(middleLinkDir).isDirectory();
+
+    Path badLink = tempDir.getRoot().toPath().resolve("bad-link");
+    IoTestUtil.createSymbolicLink(badLink, Paths.get("bad-target"));
+    try {
+      NioFiles.createDirectories(badLink);
+      fail("`createDirectories()` over a dangling symlink shall not pass");
+    }
+    catch (FileAlreadyExistsException ignored) { }
+  }
+
+  @Test
+  public void setReadOnly() throws IOException {
+    Path f = tempDir.newFile("f").toPath();
+
+    NioFiles.setReadOnly(f, true);
+    try {
+      Files.writeString(f, "test");
+      fail("Writing to " + f + " should have failed");
+    }
+    catch (AccessDeniedException ignored) { }
+
+    NioFiles.setReadOnly(f, false);
+    Files.writeString(f, "test");
+
+    Path d = tempDir.newDirectory("d").toPath(), child = d.resolve("f");
+
+    NioFiles.setReadOnly(d, true);
+    if (!SystemInfo.isWindows) {
+      try {
+        Files.createFile(child);
+        fail("Creating " + child + " should have failed");
+      }
+      catch (AccessDeniedException ignored) { }
+    }
+
+    NioFiles.setReadOnly(d, false);
+    Files.createFile(child);
   }
 }

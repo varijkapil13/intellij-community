@@ -56,6 +56,8 @@ public class ClsMirrorBuildingTest extends LightIdeaTestCase {
   public void testExtendsObjectAnnotated() { doTest(); }
   public void testRecordTest() { doTest(); }
   public void testRecordTestCustomHash() { doTest(); }
+  public void testInheritFromDollar() { doTest(); }
+  public void testInheritFromDollar$1() { doTest(); }
 
   public void testTextPsiMismatch() {
     CommonCodeStyleSettings.IndentOptions options = CodeStyle.getSettings(getProject()).getIndentOptions(JavaFileType.INSTANCE);
@@ -84,7 +86,7 @@ public class ClsMirrorBuildingTest extends LightIdeaTestCase {
     VirtualFile file = StandardFileSystems.jar().findFileByPath(path);
     assertNotNull(path, file);
 
-    InnerClassSourceStrategy<VirtualFile> strategy = new InnerClassSourceStrategy<VirtualFile>() {
+    InnerClassSourceStrategy<VirtualFile> strategy = new InnerClassSourceStrategy<>() {
       @Override
       public VirtualFile findInnerClass(String innerName, VirtualFile outerClass) {
         String baseName = outerClass.getNameWithoutExtension();
@@ -100,7 +102,8 @@ public class ClsMirrorBuildingTest extends LightIdeaTestCase {
           byte[] bytes = innerClass.contentsToByteArray();
           new ClassReader(bytes).accept(visitor, ClassReader.SKIP_FRAMES);
         }
-        catch (IOException ignored) { }
+        catch (IOException ignored) {
+        }
       }
     };
     PsiJavaFileStubImpl stub = new PsiJavaFileStubImpl("java.lang", true);

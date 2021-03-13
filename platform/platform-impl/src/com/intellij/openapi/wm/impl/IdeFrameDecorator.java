@@ -10,6 +10,7 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ComponentUtil;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.mac.MacMainFrameDecorator;
+import com.intellij.ui.mac.MacWinTabsHandler;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,6 +38,8 @@ public abstract class IdeFrameDecorator implements IdeFrameImpl.FrameDecorator {
   @Override
   public abstract boolean isInFullScreen();
 
+  public void setProject() {
+  }
   /**
    * Returns applied state or rejected promise if cannot be applied.
    */
@@ -65,6 +68,14 @@ public abstract class IdeFrameDecorator implements IdeFrameImpl.FrameDecorator {
     }
 
     return null;
+  }
+
+  @NotNull
+  public static JComponent wrapRootPaneNorthSide(@NotNull JRootPane rootPane, @NotNull JComponent northComponent) {
+    if (SystemInfo.isMac) {
+      return MacWinTabsHandler.wrapRootPaneNorthSide(rootPane, northComponent);
+    }
+    return northComponent;
   }
 
   protected void notifyFrameComponents(boolean state) {
@@ -99,6 +110,7 @@ public abstract class IdeFrameDecorator implements IdeFrameImpl.FrameDecorator {
         return Promises.rejectedPromise();
       }
 
+      Component toFocus = myFrame.getMostRecentFocusOwner();
       Rectangle defaultBounds = device.getDefaultConfiguration().getBounds();
       try {
         myFrame.getRootPane().putClientProperty(IdeFrameImpl.TOGGLING_FULL_SCREEN_IN_PROGRESS, Boolean.TRUE);
@@ -123,6 +135,13 @@ public abstract class IdeFrameDecorator implements IdeFrameImpl.FrameDecorator {
           myFrame.setExtendedState(extendedState);
         }
         notifyFrameComponents(state);
+
+        if (toFocus != null && !(toFocus instanceof JRootPane)) {
+          // Window 'forgets' last focused component on disposal, so we need to restore it explicitly.
+          // Special case is toggling fullscreen mode from menu. In this case menu UI moves focus to the root pane before performing
+          // the action. We shouldn't explicitly request focus in this case - menu UI will restore the focus without our help.
+          toFocus.requestFocusInWindow();
+        }
       }
       EventQueue.invokeLater(() -> {
         myFrame.getRootPane().putClientProperty(IdeFrameImpl.TOGGLING_FULL_SCREEN_IN_PROGRESS, null);
@@ -197,7 +216,7 @@ public abstract class IdeFrameDecorator implements IdeFrameImpl.FrameDecorator {
   public static boolean isCustomDecorationActive() {
     UISettings settings = UISettings.getInstanceOrNull();
     if (settings == null) {
-      // true by default is no settings is available (e.g. during the initial IDE setup wizard) and not overridden
+      // true by default if no settings is available (e.g. during the initial IDE setup wizard) and not overridden
       return isCustomDecorationAvailable()
              && !Objects.equals(UISettings.getMergeMainMenuWithWindowTitleOverrideValue(), false);
     }

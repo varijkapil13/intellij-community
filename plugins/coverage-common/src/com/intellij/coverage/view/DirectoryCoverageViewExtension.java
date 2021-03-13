@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.List;
 
 public class DirectoryCoverageViewExtension extends CoverageViewExtension {
-  private final CoverageAnnotator myAnnotator;
+  protected final CoverageAnnotator myAnnotator;
 
   public DirectoryCoverageViewExtension(Project project,
                                         CoverageAnnotator annotator,
@@ -45,7 +45,7 @@ public class DirectoryCoverageViewExtension extends CoverageViewExtension {
     if (statInfo == null) {
       return CoverageBundle.message("node.summary.no.coverage", node.toString());
     }
-    return CoverageBundle.message("node.summary.no.coverage", statInfo, node.toString());
+    return CoverageBundle.message("node.summary.coverage.statistic", statInfo, node.toString());
   }
 
   @Override

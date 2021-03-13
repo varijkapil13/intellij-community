@@ -168,12 +168,16 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
       @Override
       public void pass(@NlsContexts.DialogMessage String s) {
         setErrorText(s, myDestinationFolderCB);
+        if (s == null) {
+          validateButtons();
+        }
       }
     };
+    validateButtons();
+
     EditorComboBox comboBox = myHavePackages ? myWithBrowseButtonReference.getChildComponent() : myClassPackageChooser.getChildComponent();
     ((DestinationFolderComboBox)myDestinationFolderCB).setData(myProject, initialTargetDirectory, updater, comboBox);
     UIUtil.setEnabled(myTargetPanel, !getSourceRoots().isEmpty() && isMoveToPackage() && !myTargetDirectoryFixed, true);
-    validateButtons();
 
     myHelpID = HelpID.getMoveHelpID(elementsToMove[0]);
   }
@@ -339,7 +343,7 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
   }
 
   @Nullable
-  private static String verifyDestinationForElement(@NotNull PsiElement element, @NotNull MoveDestination moveDestination) {
+  private static @NlsContexts.DialogMessage String verifyDestinationForElement(@NotNull PsiElement element, @NotNull MoveDestination moveDestination) {
     final String message;
     if (element instanceof PsiDirectory) {
       message = moveDestination.verify((PsiDirectory)element);
@@ -414,7 +418,7 @@ public class MoveClassesOrPackagesDialog extends MoveDialogBase {
   }
 
   @Nullable
-  private String verifyInnerClassDestination() {
+  private @NlsContexts.DialogMessage String verifyInnerClassDestination() {
     PsiClass targetClass = findTargetClass();
     if (targetClass == null) return null;
 

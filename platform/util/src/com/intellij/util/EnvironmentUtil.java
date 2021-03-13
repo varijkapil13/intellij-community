@@ -1,20 +1,15 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util;
 
-import com.intellij.execution.CommandLineUtil;
 import com.intellij.execution.process.UnixProcessManager;
 import com.intellij.execution.process.WinProcessManager;
-import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfoRt;
-import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtilRt;
-import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.concurrency.AppExecutorUtil;
+import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.io.BaseOutputReader;
-import com.intellij.util.text.CaseInsensitiveStringHashingStrategy;
-import gnu.trove.THashMap;
 import org.jetbrains.annotations.*;
 
 import java.io.File;
@@ -28,12 +23,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class EnvironmentUtil {
+  public static final String READER_FILE_NAME = "printenv.py";
+
   private static final Logger LOG = Logger.getInstance(EnvironmentUtil.class);
 
   /**
@@ -50,14 +46,104 @@ public final class EnvironmentUtil {
   public static final String BASH_EXECUTABLE_NAME = "bash";
   public static final String SHELL_VARIABLE_NAME = "SHELL";
   private static final String SHELL_INTERACTIVE_ARGUMENT = "-i";
-  private static final String SHELL_LOGIN_ARGUMENT = "-l";
+  public static final String SHELL_LOGIN_ARGUMENT = "-l";
   public static final String SHELL_COMMAND_ARGUMENT = "-c";
+  public static final String SHELL_SOURCE_COMMAND = "source";
+
+  /**
+   * Holds the number of shell levels the current shell is running on top of.
+   * Tested with bash/zsh/fish/tcsh/csh/ksh.
+   */
+  private static final String SHLVL = "SHLVL";
 
   private static final AtomicReference<CompletableFuture<Map<String, String>>> ourEnvGetter = new AtomicReference<>();
 
+  private EnvironmentUtil() { }
+
+  /**
+   * <p>A wrapper layer around {@link System#getenv()}.</p>
+   *
+   * <p>On Windows, the returned map is case-insensitive (i.e. {@code map.get("Path") == map.get("PATH")} holds).</p>
+   *
+   * <p>On macOS, things are complicated.<br/>
+   * An app launched by a GUI launcher (Finder, Dock, Spotlight etc.) receives a pretty empty and useless environment,
+   * since standard Unix ways of setting variables via e.g. ~/.profile do not work. What's more important, there are no
+   * sane alternatives. This causes a lot of user complaints about tools working in a terminal not working when launched
+   * from the IDE. To ease their pain, the IDE loads a shell environment (see {@link #getShellEnv} for gory details)
+   * and returns it as the result.<br/>
+   * And one more thing (c): locale variables on macOS are usually set by a terminal app - meaning they are missing
+   * even from a shell environment above. This again causes user complaints about tools being unable to output anything
+   * outside ASCII range when launched from the IDE. Resolved by adding LC_CTYPE variable to the map if it doesn't contain
+   * explicitly set locale variables (LANG/LC_ALL/LC_CTYPE). See {@link #setCharsetVar} for details.</p>
+   *
+   * @return unmodifiable map of the process environment.
+   */
+  public static @NotNull Map<String, String> getEnvironmentMap() {
+    CompletableFuture<Map<String, String>> getter = ourEnvGetter.get();
+    if (getter == null) {
+      getter = CompletableFuture.completedFuture(getSystemEnv());
+      if (!ourEnvGetter.compareAndSet(null, getter)) {
+        getter = ourEnvGetter.get();
+      }
+    }
+    try {
+      return getter.join();
+    }
+    catch (Throwable t) {
+      throw new AssertionError(t);  // unknown state; is not expected to happen
+    }
+  }
+
+  @ApiStatus.Internal
+  public static @NotNull Future<@Nullable Boolean> loadEnvironment(@NotNull Path reader, @NotNull Runnable callback) {
+    if (!shouldLoadShellEnv()) {
+      ourEnvGetter.set(CompletableFuture.completedFuture(getSystemEnv()));
+      return CompletableFuture.completedFuture(null);
+    }
+
+    CompletableFuture<Boolean> state = new CompletableFuture<>();
+    ourEnvGetter.set(CompletableFuture.supplyAsync(() -> {
+      Boolean result = Boolean.TRUE;
+      try {
+        Map<String, String> env = getShellEnv(reader);
+        setCharsetVar(env);
+        return Collections.unmodifiableMap(env);
+      }
+      catch (Throwable t) {
+        result = Boolean.FALSE;
+        LOG.warn("can't get shell environment", t);
+        return getSystemEnv();
+      }
+      finally {
+        callback.run();
+        state.complete(result);
+      }
+    }, AppExecutorUtil.getAppExecutorService()));
+    return state;
+  }
+
+  private static boolean shouldLoadShellEnv() {
+    if (!SystemInfoRt.isMac) {
+      return false;
+    }
+    // The method is called too early when the IDE starts up, at this point the registry values have not been loaded yet from the service.
+    // Using a system property is a good alternative.
+    if (!Boolean.parseBoolean(System.getProperty("ij.load.shell.env", "true"))) {
+      LOG.info("loading shell env is turned off");
+      return false;
+    }
+    // On macOS, login shell session is not run when a user logs in, thus "SHLVL > 0" likely means that IDE is run from a terminal.
+    String shLvl = System.getenv(SHLVL);
+    if (StringUtilRt.parseInt(shLvl, 0) > 0) {
+      LOG.info("loading shell env is skipped: IDE has been launched from a terminal (" + SHLVL + "=" + shLvl + ")");
+      return false;
+    }
+    return true;
+  }
+
   private static @NotNull Map<String, String> getSystemEnv() {
     if (SystemInfoRt.isWindows) {
-      return Collections.unmodifiableMap(new THashMap<>(System.getenv(), CaseInsensitiveStringHashingStrategy.INSTANCE));
+      return Collections.unmodifiableMap(CollectionFactory.createCaseInsensitiveStringMap(System.getenv()));
     }
     else if (SystemInfoRt.isXWindow) {
       // DESKTOP_STARTUP_ID variable can be set by an application launcher in X Window environment.
@@ -78,94 +164,14 @@ public final class EnvironmentUtil {
     }
   }
 
-  private EnvironmentUtil() { }
-
-  @ApiStatus.Internal
-  public static synchronized CompletableFuture<Map<String, String>> loadEnvironment(boolean loadShellEnvironment) {
-    CompletableFuture<Map<String, String>> getter = ourEnvGetter.get();
-    if (getter != null) {
-      return getter;
-    }
-
-    if (loadShellEnvironment && SystemInfoRt.isMac) {
-      getter = CompletableFuture.supplyAsync(() -> {
-        try {
-          Map<String, String> env = getShellEnv();
-          setCharsetVar(env);
-          return Collections.unmodifiableMap(env);
-        }
-        catch (Throwable e) {
-          LOG.warn("can't get shell environment", e);
-          throw new CompletionException(e);
-        }
-      }, AppExecutorUtil.getAppExecutorService());
-    }
-    else {
-      getter = CompletableFuture.completedFuture(getSystemEnv());
-    }
-
-    ourEnvGetter.set(getter);
-    return getter;
-  }
-
-  /**
-   * A wrapper layer around {@link System#getenv()}.
-   * <p>
-   * On Windows, the returned map is case-insensitive (i.e. {@code map.get("Path") == map.get("PATH")} holds).
-   * <p>
-   * On Mac OS X things are complicated.<br/>
-   * An app launched by a GUI launcher (Finder, Dock, Spotlight etc.) receives a pretty empty and useless environment,
-   * since standard Unix ways of setting variables via e.g. ~/.profile do not work. What's more important, there are no
-   * sane alternatives. This causes a lot of user complaints about tools working in a terminal not working when launched
-   * from the IDE. To ease their pain, the IDE loads a shell environment (see {@link #getShellEnv()} for gory details)
-   * and returns it as the result.<br/>
-   * And one more thing (c): locale variables on OS X are usually set by a terminal app - meaning they are missing
-   * even from a shell environment above. This again causes user complaints about tools being unable to output anything
-   * outside ASCII range when launched from the IDE. Resolved by adding LC_CTYPE variable to the map if it doesn't contain
-   * explicitly set locale variables (LANG/LC_ALL/LC_CTYPE). See {@link #setCharsetVar(Map)} for details.
-   *
-   * @return unmodifiable map of the process environment.
-   */
-  public static @NotNull Map<String, String> getEnvironmentMap() {
-    try {
-      CompletableFuture<Map<String, String>> getter = ourEnvGetter.get();
-      if (getter == null) {
-        getter = loadEnvironment(false);
-      }
-      return getter.join();
-    }
-    catch (Throwable t) {
-      return getSystemEnv();
-    }
-  }
-
   /**
    * Same as {@code getEnvironmentMap().get(name)}.
    * Returns value for the passed environment variable name, or null if no such variable found.
    *
    * @see #getEnvironmentMap()
    */
-  public static @Nullable String getValue(@NonNls @NotNull String name) {
+  public static @Nullable String getValue(@NotNull String name) {
     return getEnvironmentMap().get(name);
-  }
-
-  /**
-   * Same as {@code flattenEnvironment(getEnvironmentMap())}.
-   * Returns an environment as an array of "NAME=VALUE" strings.
-   *
-   * @see #getEnvironmentMap()
-   */
-  public static String @NotNull [] getEnvironment() {
-    return flattenEnvironment(getEnvironmentMap());
-  }
-
-  public static String @NotNull [] flattenEnvironment(@NotNull Map<String, String> environment) {
-    String[] array = new String[environment.size()];
-    int i = 0;
-    for (Map.Entry<String, String> entry : environment.entrySet()) {
-      array[i++] = entry.getKey() + "=" + entry.getValue();
-    }
-    return array;
   }
 
   /**
@@ -194,8 +200,8 @@ public final class EnvironmentUtil {
   private static final String DISABLE_OMZ_AUTO_UPDATE = "DISABLE_AUTO_UPDATE";
   private static final String INTELLIJ_ENVIRONMENT_READER = "INTELLIJ_ENVIRONMENT_READER";
 
-  private static @NotNull Map<String, String> getShellEnv() throws IOException {
-    return new ShellEnvReader().readShellEnv(null);
+  private static @NotNull Map<String, String> getShellEnv(@NotNull Path reader) throws IOException {
+    return new ShellEnvReader().doReadShellEnv(null, reader, null);
   }
 
   public static class ShellEnvReader {
@@ -218,20 +224,30 @@ public final class EnvironmentUtil {
       myTimeoutMillis = timeoutMillis;
     }
 
-    protected final @NotNull Map<String, String> readShellEnv(@Nullable Map<String, String> additionalEnvironment) throws IOException {
-      Path reader = PathManager.findBinFileWithException("printenv.py");
-
+    public final @NotNull Map<String, String> doReadShellEnv(@Nullable Path file,
+                                                             @NotNull Path reader,
+                                                             @Nullable Map<String, String> additionalEnvironment) throws IOException {
       Path envFile = Files.createTempFile("intellij-shell-env.", ".tmp");
+      StringBuilder readerCmd = new StringBuilder();
+      if (file != null) {
+        if (!Files.exists(file)) {
+          throw new NoSuchFileException(file.toString());
+        }
+        readerCmd.append(SHELL_SOURCE_COMMAND).append(" \"").append(file).append("\" && ");
+      }
+
+      readerCmd.append("'").append(reader.toAbsolutePath()).append("' '").append(envFile.toAbsolutePath()).append("'");
+
       try {
         List<String> command = getShellProcessCommand();
         int idx = command.indexOf(SHELL_COMMAND_ARGUMENT);
         if (idx >= 0) {
           // if there is already a command append command to the end
-          command.set(idx + 1, command.get(idx + 1) + ";" + "'" + reader.toAbsolutePath() + "' '" + envFile.toAbsolutePath() + "'");
+          command.set(idx + 1, command.get(idx + 1) + ';' + readerCmd);
         }
         else {
           command.add(SHELL_COMMAND_ARGUMENT);
-          command.add("'" + reader.toAbsolutePath() + "' '" + envFile.toAbsolutePath() + "'");
+          command.add(readerCmd.toString());
         }
 
         LOG.info("loading shell env: " + String.join(" ", command));
@@ -247,43 +263,6 @@ public final class EnvironmentUtil {
           LOG.warn("Cannot delete temporary file", e);
         }
       }
-    }
-
-    public @NotNull Map<String, String> readBatEnv(@NotNull Path batchFile, List<String> args) throws Exception {
-      return readBatOutputAndEnv(batchFile, args).second;
-    }
-
-    protected @NotNull Pair<String, Map<String, String>> readBatOutputAndEnv(@NotNull Path batchFile, List<String> args) throws Exception {
-      Path envFile = Files.createTempFile("intellij-cmd-env.", ".tmp");
-      try {
-        List<String> cl = new ArrayList<>();
-        cl.add(CommandLineUtil.getWinShellName());
-        cl.add("/c");
-        cl.add("call");
-        cl.add(batchFile.toString());
-        cl.addAll(args);
-        cl.add("&&");
-        cl.addAll(getReadEnvCommand());
-        cl.add(envFile.toString());
-        cl.addAll(Arrays.asList("||", "exit", "/B", "%ERRORLEVEL%"));
-        return runProcessAndReadOutputAndEnvs(cl, batchFile.getParent(), null, envFile);
-      }
-      finally {
-        try {
-          Files.delete(envFile);
-        }
-        catch (NoSuchFileException ignore) {
-        }
-        catch (IOException e) {
-          LOG.warn("Cannot delete temporary file", e);
-        }
-      }
-    }
-
-    private static @NotNull List<String> getReadEnvCommand() {
-      return Arrays.asList(FileUtilRt.toSystemDependentName(System.getProperty("java.home") + "/bin/java"),
-                           "-cp", PathManager.getJarPathForClass(ReadEnv.class),
-                           ReadEnv.class.getCanonicalName());
     }
 
     protected final @NotNull Pair<String, Map<String, String>> runProcessAndReadOutputAndEnvs(@NotNull List<String> command,
@@ -355,6 +334,7 @@ public final class EnvironmentUtil {
     return commands;
   }
 
+  @SuppressWarnings("SSBasedInspection")
   public static @NotNull Map<String, String> parseEnv(String @NotNull[] lines) {
     Set<String> toIgnore = new HashSet<>(Arrays.asList("_", "PWD", "SHLVL", DISABLE_OMZ_AUTO_UPDATE, INTELLIJ_ENVIRONMENT_READER));
     Map<String, String> env = System.getenv();
@@ -434,7 +414,7 @@ public final class EnvironmentUtil {
 
   private static void setCharsetVar(@NotNull Map<String, String> env) {
     if (!isCharsetVarDefined(env)) {
-      String value = setLocaleEnv(env, CharsetToolkit.getDefaultSystemCharset());
+      String value = setLocaleEnv(env, Charset.defaultCharset());
       LOG.info("LC_CTYPE=" + value);
     }
   }
@@ -488,18 +468,13 @@ public final class EnvironmentUtil {
     }
   }
 
-  private static boolean containsEnvKeySubstitution(final String envKey, final String val) {
+  public static boolean containsEnvKeySubstitution(final String envKey, final String val) {
     return ArrayUtil.find(val.split(File.pathSeparator), "$" + envKey + "$") != -1;
   }
 
   @TestOnly
-  static Map<String, String> testLoader() {
-    try {
-      return getShellEnv();
-    }
-    catch (Exception e) {
-      throw new RuntimeException(e);
-    }
+  static Map<String, String> testLoader(@NotNull Path reader) throws IOException {
+    return getShellEnv(reader);
   }
 
   @TestOnly
@@ -528,7 +503,7 @@ public final class EnvironmentUtil {
     private final StringBuffer myBuffer;
 
     StreamGobbler(@NotNull InputStream stream) {
-      super(stream, CharsetToolkit.getDefaultSystemCharset(), OPTIONS);
+      super(stream, Charset.defaultCharset(), OPTIONS);
       myBuffer = new StringBuffer();
       start("stdout/stderr streams of shell env loading process");
     }

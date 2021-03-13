@@ -6,10 +6,11 @@ import com.intellij.openapi.project.Project
 import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
 import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
-import org.jetbrains.plugins.github.util.GithubUIUtil
+import org.jetbrains.plugins.github.ui.util.GHUIUtil
 import javax.swing.Icon
 import kotlin.properties.Delegates.observable
 
+@Suppress("EqualsOrHashCode")
 internal class GHPRTimelineVirtualFile(fileManagerId: String,
                                        project: Project,
                                        repository: GHRepositoryCoordinates,
@@ -31,7 +32,7 @@ internal class GHPRTimelineVirtualFile(fileManagerId: String,
   override fun getPath(): String = (fileSystem as GHPRVirtualFileSystem).getPath(fileManagerId, project, repository, pullRequest)
   override fun getPresentablePath() = details?.url ?: "${repository.toUrl()}/pulls/${pullRequest.number}"
 
-  fun getIcon(): Icon? = details?.let { GithubUIUtil.getPullRequestStateIcon(it.state, it.isDraft) }
+  fun getIcon(): Icon? = details?.let { GHUIUtil.getPullRequestStateIcon(it.state, it.isDraft) }
 
   override fun equals(other: Any?): Boolean {
     if (this === other) return true

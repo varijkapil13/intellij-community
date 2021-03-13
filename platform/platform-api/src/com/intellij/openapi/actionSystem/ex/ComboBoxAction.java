@@ -1,9 +1,9 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.actionSystem.ex;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.DataManager;
 import com.intellij.ide.HelpTooltip;
+import com.intellij.ide.TooltipTitle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
@@ -14,6 +14,7 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.IconLoader;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -26,6 +27,7 @@ import com.intellij.util.ui.accessibility.ScreenReader;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.*;
@@ -39,6 +41,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
   private static Icon myIcon;
   private static Icon myDisabledIcon;
 
+  @NotNull
   public static Icon getArrowIcon(boolean enabled) {
     if (myIcon != AllIcons.General.ArrowDown) {
       myIcon = UIManager.getIcon("ComboBoxButton.arrowIcon");
@@ -50,7 +53,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     return enabled ? myIcon : myDisabledIcon;
   }
   private boolean mySmallVariant = true;
-  private String myPopupTitle;
+  protected @NlsContexts.PopupTitle String myPopupTitle;
 
 
   protected ComboBoxAction() {
@@ -69,7 +72,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
   }
 
   @NotNull
-  private ListPopup createActionPopup(@NotNull DataContext context, @NotNull JComponent component, @Nullable Runnable disposeCallback) {
+  protected ListPopup createActionPopup(@NotNull DataContext context, @NotNull JComponent component, @Nullable Runnable disposeCallback) {
     DefaultActionGroup group = createPopupActionGroup(component, context);
     ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(
       myPopupTitle, group, context, false, shouldShowDisabledActions(), false, disposeCallback, getMaxRows(), getPreselectCondition());
@@ -96,7 +99,8 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     return panel;
   }
 
-  protected ComboBoxButton createComboBoxButton(Presentation presentation) {
+  @NotNull
+  protected ComboBoxButton createComboBoxButton(@NotNull Presentation presentation) {
     return new ComboBoxButton(presentation);
   }
 
@@ -108,7 +112,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     mySmallVariant = smallVariant;
   }
 
-  public void setPopupTitle(String popupTitle) {
+  public void setPopupTitle(@NotNull @NlsContexts.PopupTitle String popupTitle) {
     myPopupTitle = popupTitle;
   }
 
@@ -120,7 +124,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
   protected abstract DefaultActionGroup createPopupActionGroup(JComponent button);
 
   @NotNull
-  protected DefaultActionGroup createPopupActionGroup(JComponent button, @NotNull  DataContext dataContext) {
+  protected DefaultActionGroup createPopupActionGroup(@NotNull JComponent button, @NotNull  DataContext dataContext) {
     return createPopupActionGroup(button);
   }
 
@@ -136,12 +140,12 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     return 1;
   }
 
-  protected class ComboBoxButton extends JButton implements UserActivityProviderComponent {
+  public class ComboBoxButton extends JButton implements UserActivityProviderComponent {
     private final Presentation myPresentation;
     private boolean myForcePressed;
-    private String myTooltipText;
+    private @TooltipTitle String myTooltipText;
 
-    public ComboBoxButton(Presentation presentation) {
+    public ComboBoxButton(@NotNull Presentation presentation) {
       myPresentation = presentation;
 
       setIcon(myPresentation.getIcon());
@@ -205,6 +209,12 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       });
     }
 
+    @TestOnly
+    @NotNull
+    public Presentation getPresentation() {
+      return myPresentation;
+    }
+
     @Override
     protected void fireActionPerformed(ActionEvent event) {
       if (!myForcePressed) {
@@ -243,12 +253,14 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       popup.showUnderneathOf(this);
     }
 
-    protected JBPopup createPopup(Runnable onDispose) {
+    @NotNull
+    protected JBPopup createPopup(@Nullable Runnable onDispose) {
       return createActionPopup(getDataContext(), this, onDispose);
     }
 
+    @NotNull
     protected DataContext getDataContext() {
-      return DataManager.getInstance().getDataContext(this);
+      return ActionToolbar.getDataContextFor(this);
     }
 
     @Override
@@ -269,7 +281,8 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       if (Registry.is("ide.helptooltip.enabled") && StringUtil.isNotEmpty(myTooltipText)) {
         String shortcut = KeymapUtil.getFirstKeyboardShortcutText(ComboBoxAction.this);
         new HelpTooltip().setTitle(myTooltipText).setShortcut(shortcut).installOn(this);
-      } else {
+      }
+      else {
         String tooltip = KeymapUtil.createTooltipText(myTooltipText, ComboBoxAction.this);
         setToolTipText(!tooltip.isEmpty() ? tooltip : null);
       }
@@ -367,8 +380,13 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       return true;
     }
 
-    @Override public void updateUI() {
+    @Override
+    public void updateUI() {
       super.updateUI();
+      updateMargin();
+    }
+
+    protected void updateMargin() {
       setMargin(JBUI.insets(0, 8, 0, 5));
     }
 

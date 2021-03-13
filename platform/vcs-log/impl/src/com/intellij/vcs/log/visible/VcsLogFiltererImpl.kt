@@ -41,8 +41,6 @@ class VcsLogFiltererImpl(private val logProviders: Map<VirtualFile, VcsLogProvid
                          private val commitDetailsGetter: DataGetter<out VcsFullCommitDetails>,
                          private val index: VcsLogIndex) : VcsLogFilterer {
 
-  override fun canFilterEmptyPack(filters: VcsLogFilterCollection): Boolean = false
-
   override fun filter(dataPack: DataPack,
                       oldVisiblePack: VisiblePack,
                       sortType: PermanentGraph.SortType,
@@ -119,7 +117,8 @@ class VcsLogFiltererImpl(private val logProviders: Map<VirtualFile, VcsLogProvid
 
       LOG.debug(StopWatch.formatTime(System.currentTimeMillis() - start) + " for filtering by " + filters + ", sort type " + sortType)
       return Pair(visiblePack, filterResult.commitCount)
-    } catch (e: VcsException) {
+    }
+    catch (e: VcsException) {
       return Pair(VisiblePack.ErrorVisiblePack(dataPack, filters, e), commitCount)
     }
   }
@@ -392,7 +391,8 @@ class VcsLogFiltererImpl(private val logProviders: Map<VirtualFile, VcsLogProvid
       val visiblePack = VisiblePack(dataPack, visibleGraph, textFilterResult.canRequestMore,
                                     VcsLogFilterObject.collection(hashFilter, textFilter))
       return Pair(visiblePack, textFilterResult.commitCount)
-    } catch (e: VcsException) {
+    }
+    catch (e: VcsException) {
       return Pair(VisiblePack.ErrorVisiblePack(dataPack, VcsLogFilterObject.collection(hashFilter, textFilter), e), commitCount)
     }
   }

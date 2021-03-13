@@ -16,8 +16,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.vcs.log.BaseSingleTaskController
 import git4idea.index.isTracked
 import git4idea.index.repositoryPath
-
-private val LOG = Logger.getInstance("#git4idea.light.LightGitEditorHighlighterManager")
+import org.jetbrains.annotations.NonNls
 
 class LightGitEditorHighlighterManager(val tracker: LightGitTracker) : Disposable {
   private val singleTaskController = MySingleTaskController()
@@ -115,8 +114,12 @@ class LightGitEditorHighlighterManager(val tracker: LightGitTracker) : Disposabl
 
   private data class Request(val file: VirtualFile, val repositoryPath: String)
   private data class BaseVersion(val file: VirtualFile, val text: String?) {
-    override fun toString(): String {
+    override fun toString(): @NonNls String {
       return "BaseVersion(file=$file, text=${text?.take(10) ?: "null"}"
     }
+  }
+
+  companion object {
+    private val LOG = Logger.getInstance("#git4idea.light.LightGitEditorHighlighterManager")
   }
 }

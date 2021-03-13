@@ -2,29 +2,22 @@
 package com.intellij.util.indexing.diagnostic.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.intellij.util.indexing.diagnostic.dump.paths.PortableFilePath
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class JsonFileProviderIndexStatistics(
   val providerName: String,
-  val totalNumberOfFiles: Int,
+  val totalNumberOfIndexedFiles: Int,
+  val totalNumberOfFilesFullyIndexedByExtensions: Int,
   val totalIndexingTime: JsonDuration,
-  val numberOfTooLargeForIndexingFiles: PositiveInt,
-  val tooLargeForIndexingFiles: List<JsonTooLargeForIndexingFile>?,
-  val statsPerFileType: List<JsonStatsPerFileType>,
-  val statsPerIndexer: List<JsonStatsPerIndexer>,
-  val fastIndexers: List<String /* Index ID */>
+  val numberOfTooLargeForIndexingFiles: Int,
+  // Available only if [com.intellij.util.indexing.diagnostic.IndexDiagnosticDumper.shouldDumpPathsOfIndexedFiles] is enabled.
+  val indexedFiles: List<JsonIndexedFile>?
 ) {
-
-  data class JsonStatsPerFileType(
-    val fileType: String,
-    val numberOfFiles: Int,
-    val totalFilesSize: JsonFileSize,
-    val partOfTotalIndexingTime: JsonPercentages,
-    val partOfTotalContentLoadingTime: JsonPercentages
-  )
-
-  data class JsonStatsPerIndexer(
-    val indexId: String,
-    val partOfTotalIndexingTime: JsonPercentages
+  data class JsonIndexedFile(
+    val path: PortableFilePath,
+    @JsonProperty("wfibe")
+    val wasFullyIndexedByExtensions: Boolean
   )
 }

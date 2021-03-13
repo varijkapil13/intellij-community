@@ -2,7 +2,6 @@
 package com.intellij.analysis.problemsView.toolWindow;
 
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.RangeHighlighterEx;
 import com.intellij.openapi.project.DumbAware;
@@ -29,7 +28,7 @@ import static com.intellij.ide.actions.ToggleToolbarAction.isToolbarVisible;
 import static com.intellij.psi.util.PsiUtilCore.findFileSystemItem;
 
 public final class ProblemsView implements DumbAware, ToolWindowFactory {
-  private static final String ID = "Problems View";
+  public static final String ID = "Problems View";
   private static final int CURRENT_FILE_INDEX = 0;
 
   public static @Nullable ToolWindow getToolWindow(@Nullable Project project) {
@@ -91,6 +90,11 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
     if (panel != null) panel.selectionChangedTo(selected);
   }
 
+  private static void visibilityChanged(boolean visible, @Nullable Content content) {
+    ProblemsViewPanel panel = get(ProblemsViewPanel.class, content);
+    if (panel != null) panel.visibilityChangedTo(visible);
+  }
+
   @SuppressWarnings("unchecked")
   private static <T> @Nullable T get(@NotNull Class<T> type, @Nullable Content content) {
     JComponent component = content == null ? null : content.getComponent();
@@ -98,7 +102,7 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
   }
 
   static boolean isProjectErrorsEnabled() {
-    return Experiments.getInstance().isFeatureEnabled("problems.view.project.errors.enabled");
+    return true; // TODO: use this method to disable Project Errors tab in other IDEs
   }
 
   @Override
@@ -137,6 +141,7 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
   private static ToolWindowManagerListener createListener() {
     return new ToolWindowManagerListener() {
       private final AtomicBoolean orientation = new AtomicBoolean();
+      private final AtomicBoolean visibility = new AtomicBoolean(true);
 
       @Override
       public void stateChanged(@NotNull ToolWindowManager manager) {
@@ -149,6 +154,10 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
             ProblemsViewPanel panel = get(ProblemsViewPanel.class, content);
             if (panel != null) panel.orientationChangedTo(vertical);
           }
+        }
+        boolean visible = window.isVisible();
+        if (visible != visibility.getAndSet(visible)) {
+          visibilityChanged(visible, window.getContentManager().getSelectedContent());
         }
       }
     };

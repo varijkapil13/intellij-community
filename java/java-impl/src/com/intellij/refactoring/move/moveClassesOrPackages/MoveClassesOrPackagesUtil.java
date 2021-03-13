@@ -6,6 +6,7 @@ import com.intellij.lang.java.JavaFindUsagesProvider;
 import com.intellij.model.ModelBranch;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.JavaProjectRootsUtil;
@@ -79,17 +80,6 @@ public final class MoveClassesOrPackagesUtil {
     }
   }
 
-  /** @deprecated Use {@link MoveClassesOrPackagesUtil#findNonCodeUsages(PsiElement, SearchScope, boolean, boolean, String, Collection)} */
-  @Deprecated
-  public static void findNonCodeUsages(boolean searchInStringsAndComments,
-                                       boolean searchInNonJavaFiles,
-                                       final PsiElement element,
-                                       final String newQName,
-                                       ArrayList<? super UsageInfo> results) {
-    findNonCodeUsages(element, GlobalSearchScope.projectScope(element.getProject()),
-                      searchInStringsAndComments, searchInNonJavaFiles, newQName, results);
-  }
-
   public static void findNonCodeUsages(@NotNull PsiElement element,
                                        @NotNull SearchScope searchScope,
                                        boolean searchInStringsAndComments,
@@ -116,7 +106,7 @@ public final class MoveClassesOrPackagesUtil {
       return ((PsiClassOwner)element).getName();
     }
     else {
-      LOG.error("Unknown element type");
+      LOG.error("Unknown element: " + (element == null ? null : element.getClass().getName()));
       return null;
     }
   }
@@ -147,13 +137,17 @@ public final class MoveClassesOrPackagesUtil {
       }
     }
 
-    return new PsiPackageImpl(aPackage.getManager(), newPackageQualifiedName) {
+    return findPackage(aPackage.getManager(), scope, newPackageQualifiedName);
+  }
+
+  @NotNull
+  private static PsiPackageImpl findPackage(@NotNull PsiManager manager, @NotNull GlobalSearchScope scope, String qName) {
+    return new PsiPackageImpl(manager, qName) {
       @Override
       public boolean isValid() {
         return !getProject().isDisposed() &&
-               PackageIndex.getInstance(getProject()).getDirsByPackageName(newPackageQualifiedName, scope).findFirst() != null;
+               PackageIndex.getInstance(getProject()).getDirsByPackageName(qName, scope).findFirst() != null;
       }
-
     };
   }
 
@@ -248,15 +242,24 @@ public final class MoveClassesOrPackagesUtil {
     }
 
     PsiFile file = aClass.getContainingFile();
-    final PsiPackage newPackage = JavaDirectoryService.getInstance().getPackage(moveDestination);
+    Project project = moveDestination.getProject();
+    VirtualFile dstDir = moveDestination.getVirtualFile();
+    String pkgName = ProjectRootManager.getInstance(project).getFileIndex().getPackageNameByDirectory(dstDir);
+    PsiPackage newPackage = pkgName == null ? null
+                                            : findPackage(moveDestination.getManager(), moveDestination.getResolveScope(), pkgName);
 
     newClass = aClass;
     final PsiDirectory containingDirectory = file.getContainingDirectory();
-    if (!Comparing.equal(moveDestination.getVirtualFile(), containingDirectory != null ? containingDirectory.getVirtualFile() : null)) {
+    if (!Comparing.equal(dstDir, containingDirectory != null ? containingDirectory.getVirtualFile() : null)) {
       MoveFilesOrDirectoriesUtil.doMoveFile(file, moveDestination);
 
       if (ModelBranch.getPsiBranch(moveDestination) == null) {
-        DumbService.getInstance(moveDestination.getProject()).completeJustSubmittedTasks();
+        DumbService.getInstance(project).completeJustSubmittedTasks();
+        PsiDocumentManager documentManager = PsiDocumentManager.getInstance(project);
+        Document document = documentManager.getCachedDocument(file);
+        if (document != null) {
+          documentManager.commitDocument(document);
+        }
       }
 
       file = moveDestination.findFile(file.getName());
@@ -308,16 +311,19 @@ public final class MoveClassesOrPackagesUtil {
     PsiDirectory[] directories = aPackage != null ? aPackage.getDirectories() : null;
     final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     final VirtualFile baseDirVirtualFile = baseDir != null ? baseDir.getVirtualFile() : null;
-    final boolean isBaseDirInTestSources = baseDirVirtualFile != null && fileIndex.isInTestSourceContent(baseDirVirtualFile);
-    if (directories != null && directories.length == 1 && (baseDirVirtualFile == null ||
-                                                           fileIndex.isInTestSourceContent(directories[0].getVirtualFile()) == isBaseDirInTestSources)) {
+    final VirtualFile baseSourceRoot = baseDirVirtualFile != null ? fileIndex.getSourceRootForFile(baseDirVirtualFile) : null;
+    if (directories != null && 
+        directories.length == 1 && 
+        baseSourceRoot != null && 
+        baseSourceRoot.equals(fileIndex.getSourceRootForFile(directories[0].getVirtualFile()))) {
       directory = directories[0];
     }
     else {
       final List<VirtualFile> contentSourceRoots = JavaProjectRootsUtil.getSuitableDestinationSourceRoots(project);
-      if (contentSourceRoots.size() == 1 && (baseDirVirtualFile == null || fileIndex.isInTestSourceContent(contentSourceRoots.get(0)) == isBaseDirInTestSources)) {
-        directory = WriteAction
-          .compute(() -> RefactoringUtil.createPackageDirectoryInSourceRoot(packageWrapper, contentSourceRoots.get(0)));
+      if (contentSourceRoots.size() == 1 && 
+          baseSourceRoot != null && 
+          baseSourceRoot.equals(contentSourceRoots.get(0))) {
+        directory = WriteAction.compute(() -> RefactoringUtil.createPackageDirectoryInSourceRoot(packageWrapper, contentSourceRoots.get(0)));
       }
       else {
         final VirtualFile sourceRootForFile = chooseSourceRoot(packageWrapper, contentSourceRoots, baseDir);

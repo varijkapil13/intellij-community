@@ -99,7 +99,7 @@ public class FileHistoryPanel extends JPanel implements DataProvider, Disposable
       @Override
       protected void navigate(@NotNull CommitId commit) {
         VcsLogContentUtil.runInMainLog(myProject, ui -> {
-          ui.jumpToCommit(commit.getHash(), commit.getRoot());
+          ui.getVcsLog().jumpToCommit(commit.getHash(), commit.getRoot());
         });
       }
     };
@@ -126,8 +126,8 @@ public class FileHistoryPanel extends JPanel implements DataProvider, Disposable
 
     setLayout(new BorderLayout());
     if (withDiffPreview) {
-      add(new FrameDiffPreview<FileHistoryDiffProcessor>(createDiffPreview(false), myProperties, tablePanel,
-                                                         "vcs.history.diff.splitter.proportion", false, 0.7f) {
+      add(new FrameDiffPreview<>(createDiffPreview(false), myProperties, tablePanel,
+                                 "vcs.history.diff.splitter.proportion", false, 0.7f) {
 
         @Override
         public void updatePreview(boolean state) {
@@ -236,6 +236,7 @@ public class FileHistoryPanel extends JPanel implements DataProvider, Disposable
         return FileHistoryUtil.createVcsVirtualFile(myFileHistoryModel.createRevision(detail));
       })
       .ifEq(CommonDataKeys.VIRTUAL_FILE).thenGet(myFilePath::getVirtualFile)
+      .ifEq(VcsLogInternalDataKeys.VCS_LOG_VISIBLE_ROOTS).thenGet(() -> Collections.singleton(myRoot))
       .ifEq(VcsDataKeys.VCS_NON_LOCAL_HISTORY_SESSION).then(false)
       .ifEq(VcsLogInternalDataKeys.LOG_DIFF_HANDLER).thenGet(() -> myFileHistoryModel.getDiffHandler())
       .orNull();

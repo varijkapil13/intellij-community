@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.ui.branch.dashboard
 
 import com.intellij.icons.AllIcons
@@ -7,11 +7,13 @@ import com.intellij.ide.DataManager
 import com.intellij.ide.DefaultTreeExpander
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.progress.util.ProgressWindow
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vcs.changes.ui.ChangesBrowserBase
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.ui.IdeBorderFactory.createBorder
@@ -20,6 +22,8 @@ import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SideBorder
 import com.intellij.ui.components.panels.NonOpaquePanel
+import com.intellij.ui.speedSearch.SpeedSearch
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.JBUI.Panels.simplePanel
 import com.intellij.util.ui.StatusText.getDefaultEmptyText
@@ -53,9 +57,13 @@ import git4idea.ui.branch.dashboard.BranchesDashboardActions.ShowBranchDiffActio
 import git4idea.ui.branch.dashboard.BranchesDashboardActions.ShowMyBranchesAction
 import git4idea.ui.branch.dashboard.BranchesDashboardActions.ToggleFavoriteAction
 import git4idea.ui.branch.dashboard.BranchesDashboardActions.UpdateSelectedBranchAction
-import org.jetbrains.annotations.CalledInAwt
 import java.awt.Component
+import java.awt.datatransfer.DataFlavor
+import java.awt.event.ActionEvent
+import javax.swing.AbstractAction
+import javax.swing.Action
 import javax.swing.JComponent
+import javax.swing.TransferHandler
 import javax.swing.event.TreeSelectionListener
 
 internal class BranchesDashboardUi(project: Project, private val logUi: BranchesVcsLogUi) : Disposable {
@@ -80,10 +88,13 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
     val ui = logUi
 
     val properties = ui.properties
-    val changeLogFilterAllowed = properties[CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY]
-    if (!changeLogFilterAllowed) return@TreeSelectionListener
 
-    updateLogBranchFilter()
+    if (properties[CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY]) {
+      updateLogBranchFilter()
+    }
+    else if (properties[NAVIGATE_LOG_TO_BRANCH_ON_BRANCH_SELECTION_PROPERTY]) {
+      navigateToSelectedBranch(false)
+    }
   }
 
   internal fun updateLogBranchFilter() {
@@ -96,6 +107,12 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
       oldFilters.without(VcsLogBranchLikeFilter::class.java)
     }
     ui.filterUi.filters = newFilters
+  }
+
+  internal fun navigateToSelectedBranch(focus: Boolean) {
+    val selectedReference = tree.getSelectedBranchFilters().singleOrNull() ?: return
+
+    logUi.vcsLog.jumpToReference(selectedReference, focus)
   }
 
   private val BRANCHES_UI_FOCUS_TRAVERSAL_POLICY = object : ComponentsListFocusTraversalPolicy() {
@@ -112,7 +129,7 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
     toggleBranchesPanelVisibility()
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun installLogUi() {
     uiController.registerDataPackListener(logUi.logData)
     uiController.registerLogUiPropertiesListener(logUi.properties)
@@ -129,7 +146,7 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
     tree.component.addTreeSelectionListener(treeSelectionListener)
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun disposeBranchesUi() {
     branchViewSplitter.secondComponent.removeAll()
     uiController.removeDataPackListener(logUi.logData)
@@ -147,6 +164,7 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
     deleteAction.registerCustomShortcutSet(CustomShortcutSet(*shortcuts), branchesTreeWithLogPanel)
 
     createFocusFilterFieldAction(branchesSearchField)
+    installPasteAction(tree)
 
     val groupByDirectoryAction = GroupBranchByDirectoryAction(tree)
     val toggleFavoriteAction = ToggleFavoriteAction()
@@ -172,6 +190,7 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
     group.add(showMyBranchesAction)
     group.add(fetchAction)
     group.add(toggleFavoriteAction)
+    group.add(actionManager.getAction("Git.Log.Branches.Navigate.Log.To.Selected.Branch"))
     group.add(Separator())
     group.add(settings)
     group.add(groupByDirectoryAction)
@@ -216,6 +235,20 @@ internal class BranchesDashboardUi(project: Project, private val logUi: Branches
         IdeFocusManager.getInstance(project).requestFocus(tree.component, true)
       }
     }.registerCustomShortcutSet(KeymapUtil.getActiveKeymapShortcuts("Find"), branchesTreePanel)
+  }
+
+  private fun installPasteAction(tree: FilteringBranchesTree) {
+    tree.component.actionMap.put(TransferHandler.getPasteAction().getValue(Action.NAME), object: AbstractAction () {
+      override fun actionPerformed(e: ActionEvent?) {
+        val speedSearch = tree.searchModel.speedSearch as? SpeedSearch ?: return
+        val pasteContent =
+          CopyPasteManager.getInstance().getContents<String>(DataFlavor.stringFlavor)
+            // the same filtering logic as in javax.swing.text.PlainDocument.insertString (e.g. DnD to search field)
+            ?.let { StringUtil.convertLineSeparators(it, " ") }
+        speedSearch.type(pasteContent)
+        speedSearch.update()
+      }
+    })
   }
 
   inner class BranchesTreePanel : BorderLayoutPanel(), DataProvider {
@@ -312,6 +345,11 @@ internal val SHOW_GIT_BRANCHES_LOG_PROPERTY =
 
 internal val CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY =
   object : VcsLogApplicationSettings.CustomBooleanProperty("Change.Log.Filter.on.Branch.Selection") {
+    override fun defaultValue() = false
+  }
+
+internal val NAVIGATE_LOG_TO_BRANCH_ON_BRANCH_SELECTION_PROPERTY =
+  object : VcsLogApplicationSettings.CustomBooleanProperty("Navigate.Log.To.Branch.on.Branch.Selection") {
     override fun defaultValue() = false
   }
 

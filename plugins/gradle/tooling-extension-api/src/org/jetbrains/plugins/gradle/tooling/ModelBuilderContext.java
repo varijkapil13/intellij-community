@@ -5,11 +5,12 @@ import org.gradle.api.Project;
 import org.gradle.api.invocation.Gradle;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * @author Vladislav.Soroka
  */
-public interface ModelBuilderContext {
+public interface ModelBuilderContext extends MessageReporter {
   /**
    * @return root Gradle instance
    */
@@ -17,16 +18,19 @@ public interface ModelBuilderContext {
   Gradle getRootGradle();
 
   /**
+   * @return the value of the parameter passed to the builder, if the parametrized version of {@link BuildController#getModel} is used.
+   */
+  @Nullable
+  String getParameter();
+
+  /**
    * @return cached data if it's already created, newly created data otherwise
    */
   @NotNull
   <T> T getData(@NotNull DataProvider<T> provider);
 
-  @ApiStatus.Experimental
-  void report(@NotNull Project project, @NotNull Message message);
-
   interface DataProvider<T> {
     @NotNull
-    T create(@NotNull Gradle gradle);
+    T create(@NotNull Gradle gradle, @NotNull MessageReporter messageReporter);
   }
 }

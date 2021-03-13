@@ -2,14 +2,14 @@
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.ProjectTopics;
+import com.intellij.ide.plugins.DynamicPluginListener;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.extensions.ExtensionPointListener;
-import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.fileTypes.InternalFileType;
@@ -18,9 +18,13 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
 import com.intellij.openapi.progress.util.ProgressWrapper;
 import com.intellij.openapi.project.*;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.ContentIteratorEx;
+import com.intellij.openapi.roots.ModuleRootEvent;
+import com.intellij.openapi.roots.ModuleRootListener;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -32,8 +36,10 @@ import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.file.impl.FileManagerImpl;
 import com.intellij.ui.GuiUtils;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.*;
+import com.intellij.util.indexing.roots.*;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,11 +47,20 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RunnableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesUpdater {
   private static final Logger LOG = Logger.getInstance(PushedFilePropertiesUpdater.class);
+
+  private static final int SCANNING_EXECUTOR_THREAD_COUNT = Math.max(UnindexedFilesUpdater.getNumberOfScanningThreads() - 1, 1);
+  private static final ExecutorService GLOBAL_SCANNING_EXECUTOR  = AppExecutorUtil.createBoundedApplicationPoolExecutor(
+    "Scanning", SCANNING_EXECUTOR_THREAD_COUNT
+  );
 
   private final Project myProject;
 
@@ -66,18 +81,13 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
         }
       }
     });
-    FilePropertyPusher.EP_NAME.addExtensionPointListener(new ExtensionPointListener<FilePropertyPusher<?>>() {
-      @Override
-      public void extensionAdded(@NotNull FilePropertyPusher<?> pusher, @NotNull PluginDescriptor pluginDescriptor) {
-        queueFullUpdate();
-      }
-    }, project);
-  }
 
-  private void queueFullUpdate() {
-    myTasks.clear();
-    queueTasks(Arrays.asList(this::initializeProperties, () -> doPushAll(FilePropertyPusher.EP_NAME.getExtensionList(),
-                                                                         ProjectFileScanner.EP_NAME.getExtensionList())));
+    project.getMessageBus().connect().subscribe(DynamicPluginListener.TOPIC, new DynamicPluginListener() {
+      @Override
+      public void beforePluginLoaded(@NotNull IdeaPluginDescriptor pluginDescriptor) {
+        myTasks.clear();
+      }
+    });
   }
 
   @ApiStatus.Internal
@@ -116,7 +126,7 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
       }
     }
     boolean pushingSomethingSynchronously =
-      !syncTasks.isEmpty() && syncTasks.size() < FileBasedIndexProjectHandler.ourMinFilesToStartDumMode;
+      !syncTasks.isEmpty() && syncTasks.size() < FileBasedIndexProjectHandler.ourMinFilesToStartDumbMode;
     if (pushingSomethingSynchronously) {
       // push synchronously to avoid entering dumb mode in the middle of a meaningful write action
       // when only a few files are created/moved
@@ -142,7 +152,7 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
   }
 
   @Override
-  public void runConcurrentlyIfPossible(List<Runnable> tasks) {
+  public void runConcurrentlyIfPossible(List<? extends Runnable> tasks) {
     invokeConcurrentlyIfPossible(tasks);
   }
 
@@ -156,41 +166,11 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
   @Override
   public void pushAllPropertiesNow() {
     performPushTasks();
-    doPushAll(FilePropertyPusher.EP_NAME.getExtensionList(), ProjectFileScanner.EP_NAME.getExtensionList());
+    doPushAll(FilePropertyPusher.EP_NAME.getExtensionList());
   }
 
-  @Nullable
-  private Runnable createRecursivePushTask(@NotNull VFileEvent event, @NotNull List<? extends FilePropertyPusher<?>> pushers) {
-    List<ProjectFileScanner> scanners = ProjectFileScanner.EP_NAME.getExtensionList();
-    if (pushers.isEmpty() && scanners.isEmpty()) {
-      return null;
-    }
-
-    return () -> {
-      // delay calling event.getFile() until background to avoid expensive VFileCreateEvent.getFile() in EDT
-      VirtualFile dir = getFile(event);
-      ProjectFileIndex fileIndex = ReadAction.compute(() -> ProjectFileIndex.getInstance(myProject));
-      if (dir != null && ReadAction.compute(() -> fileIndex.isInContent(dir)) && !ProjectUtil.isProjectOrWorkspaceFile(dir)) {
-        doPushRecursively(dir, pushers, scanners, fileIndex);
-      }
-    };
-  }
-
-  private void doPushRecursively(@NotNull VirtualFile dir,
-                                 @NotNull List<? extends FilePropertyPusher<?>> pushers,
-                                 @NotNull List<ProjectFileScanner> scanners,
-                                 @NotNull ProjectFileIndex fileIndex) {
-    List<ProjectFileScanner.ScanSession> sessions = ContainerUtil.map(scanners,
-                                                                      visitor -> visitor.startSession(myProject, dir));
-    fileIndex.iterateContentUnderDirectory(dir, fileOrDir -> {
-      applyPushersToFile(fileOrDir, pushers, null);
-      applyScannersToFile(fileOrDir, sessions);
-      return true;
-    });
-  }
-
-  private static void applyScannersToFile(@NotNull VirtualFile fileOrDir, @NotNull List<ProjectFileScanner.ScanSession> sessions) {
-    for (ProjectFileScanner.ScanSession session : sessions) {
+  public static void applyScannersToFile(@NotNull VirtualFile fileOrDir, List<IndexableFileScanner.IndexableFileVisitor> sessions) {
+    for (IndexableFileScanner.IndexableFileVisitor session : sessions) {
       try {
         session.visitFile(fileOrDir);
       }
@@ -201,6 +181,35 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
         LOG.error("Failed to visit file", e, new Attachment("filePath.txt", fileOrDir.getPath()));
       }
     }
+  }
+
+  @Nullable
+  private Runnable createRecursivePushTask(@NotNull VFileEvent event, @NotNull List<? extends FilePropertyPusher<?>> pushers) {
+    List<IndexableFileScanner> scanners = IndexableFileScanner.EP_NAME.getExtensionList();
+    if (pushers.isEmpty() && scanners.isEmpty()) {
+      return null;
+    }
+
+    return () -> {
+      // delay calling event.getFile() until background to avoid expensive VFileCreateEvent.getFile() in EDT
+      VirtualFile dir = getFile(event);
+      ProjectFileIndex fileIndex = ReadAction.compute(() -> ProjectFileIndex.getInstance(myProject));
+      if (dir != null && ReadAction.compute(() -> fileIndex.isInContent(dir)) && !ProjectUtil.isProjectOrWorkspaceFile(dir)) {
+        doPushRecursively(pushers, scanners, new ProjectIndexableFilesIteratorImpl(dir));
+      }
+    };
+  }
+
+  private void doPushRecursively(@NotNull List<? extends FilePropertyPusher<?>> pushers,
+                                 @NotNull List<IndexableFileScanner> scanners,
+                                 @NotNull IndexableFilesIterator indexableFilesIterator) {
+    List<IndexableFileScanner.IndexableFileVisitor> sessions =
+      ContainerUtil.mapNotNull(scanners, visitor -> visitor.startSession(myProject).createVisitor(indexableFilesIterator.getOrigin()));
+    indexableFilesIterator.iterateFiles(myProject, fileOrDir -> {
+      applyPushersToFile(fileOrDir, pushers, null);
+      applyScannersToFile(fileOrDir, sessions);
+      return true;
+    }, IndexableFilesDeduplicateFilter.create());
   }
 
   private void queueTasks(@NotNull List<? extends Runnable> actions) {
@@ -219,10 +228,6 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
         DumbService.getInstance(myProject).cancelTask(task);
       }
     });
-    FilePropertyPusher.EP_NAME.addChangeListener(() -> {
-      DumbService.getInstance(myProject).cancelTask(task);
-      queueFullUpdate();
-    }, task);
     DumbService.getInstance(myProject).queueTask(task);
   }
 
@@ -249,12 +254,7 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
   }
 
   private void scheduleDumbModeReindexingIfNeeded() {
-    if (myProject.isDisposed()) return;
-
-    DumbModeTask task = FileBasedIndexProjectHandler.createChangedFilesIndexingTask(myProject);
-    if (task != null) {
-      DumbService.getInstance(myProject).queueTask(task);
-    }
+    FileBasedIndexProjectHandler.scheduleReindexingInDumbMode(myProject);
   }
 
   @Override
@@ -292,75 +292,74 @@ public final class PushedFilePropertiesUpdaterImpl extends PushedFilePropertiesU
 
   @Override
   public void pushAll(FilePropertyPusher<?> @NotNull ... pushers) {
-    queueTasks(Collections.singletonList(() -> doPushAll(Arrays.asList(pushers), ProjectFileScanner.EP_NAME.getExtensionList())));
+    queueTasks(Collections.singletonList(() -> doPushAll(Arrays.asList(pushers))));
   }
 
-  private void doPushAll(@NotNull List<? extends FilePropertyPusher<?>> pushers, @NotNull List<ProjectFileScanner> scanners) {
-    List<ProjectFileScanner.ScanSession> sessions = ContainerUtil.map(scanners,
-                                                                      visitor -> visitor.startSession(myProject, null));
-    scanProject(myProject, module -> {
+  private void doPushAll(@NotNull List<? extends FilePropertyPusher<?>> pushers) {
+    scanProject(myProject, moduleFileSet -> {
       final Object[] moduleValues = new Object[pushers.size()];
       for (int i = 0; i < moduleValues.length; i++) {
-        moduleValues[i] = pushers.get(i).getImmediateValue(module);
+        moduleValues[i] = pushers.get(i).getImmediateValue(moduleFileSet.getOrigin().getModule());
       }
       return fileOrDir -> {
         applyPushersToFile(fileOrDir, pushers, moduleValues);
-        applyScannersToFile(fileOrDir, sessions);
         return ContentIteratorEx.Status.CONTINUE;
       };
     });
   }
 
-  public static void scanProject(@NotNull Project project, @NotNull Function<Module, ContentIteratorEx> iteratorProducer) {
+  public static void scanProject(@NotNull Project project, @NotNull Function<? super ModuleIndexableFilesIterator, ? extends ContentIteratorEx> iteratorProducer) {
     Module[] modules = ReadAction.compute(() -> ModuleManager.getInstance(project).getModules());
-    List<Runnable> tasks = ContainerUtil.mapNotNull(modules, module -> {
-      return ReadAction.compute(() -> {
-        if (module.isDisposed()) return null;
-        ProgressManager.checkCanceled();
-        ModuleFileIndex fileIndex = ModuleRootManager.getInstance(module).getFileIndex();
-        ContentIteratorEx iterator = iteratorProducer.apply(module);
-        return () -> fileIndex.iterateContent(iterator);
-      });
-    });
+    IndexableFilesDeduplicateFilter indexableFilesDeduplicateFilter = IndexableFilesDeduplicateFilter.create();
+    List<Runnable> tasks = Arrays.stream(modules)
+      .flatMap(module -> {
+        return ReadAction.compute(() -> {
+          if (module.isDisposed()) return Stream.empty();
+          ProgressManager.checkCanceled();
+          return ContainerUtil.map(ModuleIndexableFilesIteratorImpl.getModuleIterators(module), it -> new Object() {
+            final IndexableFilesIterator files = it;
+            final ContentIteratorEx iterator = iteratorProducer.apply(it);
+          })
+            .stream()
+            .map(pair -> (Runnable)() -> {
+            pair.files.iterateFiles(project, pair.iterator, indexableFilesDeduplicateFilter);
+          });
+        });
+      })
+      .collect(Collectors.toList());
     invokeConcurrentlyIfPossible(tasks);
   }
 
+  // TODO: this method may return earlier than all spawned threads have completed.
   public static void invokeConcurrentlyIfPossible(@NotNull List<? extends Runnable> tasks) {
     if (tasks.isEmpty()) return;
-    if (tasks.size() == 1 ||
-        ApplicationManager.getApplication().isWriteAccessAllowed()) {
+    if (tasks.size() == 1 || ApplicationManager.getApplication().isWriteAccessAllowed()) {
       for (Runnable r : tasks) r.run();
       return;
     }
 
     final ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
 
-    final ConcurrentLinkedQueue<Runnable> tasksQueue = new ConcurrentLinkedQueue<>(tasks);
-    List<Future<?>> results = new ArrayList<>();
-    if (tasks.size() > 1) {
-      int numThreads = Math.max(Math.min(UnindexedFilesUpdater.getNumberOfIndexingThreads() - 1, tasks.size() - 1), 1);
+    Runnable taskProcessor = new Runnable() {
+      final ConcurrentLinkedQueue<Runnable> tasksQueue = new ConcurrentLinkedQueue<>(tasks);
 
-      for (int i = 0; i < numThreads; ++i) {
-        results.add(ApplicationManager.getApplication().executeOnPooledThread(() -> ProgressManager.getInstance().runProcess(() -> {
-          Runnable runnable;
-          while ((runnable = tasksQueue.poll()) != null) runnable.run();
-        }, ProgressWrapper.wrap(progress))));
+      @Override
+      public void run() {
+        Runnable runnable;
+        while ((runnable = tasksQueue.poll()) != null) runnable.run();
       }
+    };
+
+    List<Future<?>> results = new ArrayList<>();
+    for (int i = 0; i < SCANNING_EXECUTOR_THREAD_COUNT; i++) {
+      results.add(GLOBAL_SCANNING_EXECUTOR.submit(() -> {
+        ProgressManager.getInstance().runProcess(taskProcessor, ProgressWrapper.wrap(progress));
+      }));
     }
 
-    Runnable runnable;
-    while ((runnable = tasksQueue.poll()) != null) runnable.run();
-
     for (Future<?> result : results) {
-      try {
-        result.get();
-      }
-      catch (InterruptedException ex) {
-        throw new ProcessCanceledException(ex);
-      }
-      catch (Exception ex) {
-        LOG.error(ex);
-      }
+      ((RunnableFuture<?>)result).run();
+      ProgressIndicatorUtils.awaitWithCheckCanceled(result);
     }
   }
 

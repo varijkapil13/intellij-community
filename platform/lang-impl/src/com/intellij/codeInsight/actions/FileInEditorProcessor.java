@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2014 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.actions;
 
 import com.intellij.application.options.CodeStyle;
@@ -21,6 +7,7 @@ import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.actions.ShowSettingsUtilImpl;
+import com.intellij.lang.LangBundle;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -35,6 +22,7 @@ import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.text.HtmlBuilder;
 import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
@@ -181,7 +169,7 @@ public class FileInEditorProcessor {
     showHint(editor, messageBuilder.getMessage(), messageBuilder.createHyperlinkListener());
   }
 
-  public static void showHint(@NotNull Editor editor, @NotNull String info, @Nullable HyperlinkListener hyperlinkListener) {
+  public static void showHint(@NotNull Editor editor, @NotNull @NlsContexts.HintText String info, @Nullable HyperlinkListener hyperlinkListener) {
     JComponent component = HintUtil.createInformationLabel(info, hyperlinkListener, null, null);
     LightweightHint hint = new LightweightHint(component);
 
@@ -196,10 +184,10 @@ public class FileInEditorProcessor {
 
   private static void showHintWithoutScroll(Editor editor, LightweightHint hint, int flags) {
     Rectangle visibleArea = editor.getScrollingModel().getVisibleArea();
-    
+
     short constraint;
     int y;
-    
+
     if (isCaretAboveTop(editor, visibleArea)) {
       y = visibleArea.y;
       constraint = HintManager.UNDER;
@@ -208,9 +196,9 @@ public class FileInEditorProcessor {
       y = visibleArea.y + visibleArea.height;
       constraint = HintManager.ABOVE;
     }
-    
+
     Point hintPoint = new Point(visibleArea.x + (visibleArea.width / 2), y);
-    
+
     JComponent component = HintManagerImpl.getExternalComponent(editor);
     Point convertedPoint = SwingUtilities.convertPoint(editor.getContentComponent(), hintPoint, component);
     HintManagerImpl.getInstanceImpl().showEditorHint(hint, editor, convertedPoint, flags, 0, false, constraint);
@@ -239,11 +227,15 @@ public class FileInEditorProcessor {
     @Override
     public String getMessage() {
       VirtualFile virtualFile = myFile.getVirtualFile();
-      String name = virtualFile != null ? virtualFile.getName() : "the file";
-      return "<html>" +
-             "Formatting is disabled for " + name +
-             "<p><span><a href=''>Show settings...</a></span>" +
-             "</html>";
+      String message = virtualFile == null ? LangBundle.message("formatter.unavailable.message")
+                                           : LangBundle.message("formatter.unavailable.for.0.message", virtualFile.getName());
+      return new HtmlBuilder().append(message).append(
+        HtmlChunk.p().child(
+          HtmlChunk.span().child(
+            HtmlChunk.link("", LangBundle.message("formatter.unavailable.show.settings.link"))
+          )
+        )
+      ).wrapWithHtmlBody().toString();
     }
 
     @Override
@@ -262,10 +254,10 @@ public class FileInEditorProcessor {
 
       if (notifications.isEmpty() && !myNoChangesDetected) {
         if (myProcessChangesTextOnly) {
-          builder.append("No lines changed: changes since last revision are already properly formatted").br();
+          builder.append(LangBundle.message("formatter.in.editor.message.already.formatted")).br();
         }
         else {
-          builder.append("No lines changed: content is already properly formatted").br();
+          builder.append(LangBundle.message("formatter.in.editor.message.content.already.formatted")).br();
         }
       }
       else {
@@ -276,18 +268,18 @@ public class FileInEditorProcessor {
           builder.append(joinWithCommaAndCapitalize(reformatInfo, rearrangeInfo));
 
           if (myProcessChangesTextOnly) {
-            builder.append(" in changes since last revision");
+            builder.append(LangBundle.message("formatter.in.editor.message.changes.since.last.revision"));
           }
 
           builder.br();
         }
         else if (myNoChangesDetected) {
-          builder.append("No lines changed: no changes since last revision").br();
+          builder.append(LangBundle.message("formatter.in.editor.message.no.changes.since.last.revision")).br();
         }
 
         String optimizeImportsNotification = notifications.getOptimizeImportsNotification();
         if (optimizeImportsNotification != null) {
-          builder.append(StringUtil.capitalize(optimizeImportsNotification)).br();
+          builder.append(optimizeImportsNotification).br();
         }
       }
 
@@ -295,26 +287,37 @@ public class FileInEditorProcessor {
       String color = ColorUtil.toHtmlColor(JBColor.gray);
 
       builder.append(HtmlChunk.span("color:"+color)
-        .child(HtmlChunk.raw("<a href=''>Show</a> reformat dialog: ")).addText(shortcutText));
+                              .child(HtmlChunk.raw(LangBundle.message("formatter.in.editor.link.show.reformat.dialog"))).addText(shortcutText));
 
       return builder.wrapWith("html").toString();
     }
 
     @Override
     public @NotNull Runnable getHyperlinkRunnable() {
-      return () -> {
-        AnAction action = ActionManager.getInstance().getAction("ShowReformatFileDialog");
-        DataManager manager = DataManager.getInstance();
-        if (manager != null) {
-          DataContext context = manager.getDataContext(myEditor.getContentComponent());
-          action.actionPerformed(AnActionEvent.createFromAnAction(action, null, "", context));
-        }
-      };
+      return new ShowReformatDialogRunnable(myEditor);
+    }
+  }
+
+  private static class ShowReformatDialogRunnable implements Runnable {
+    private final Editor myEditor;
+
+    private ShowReformatDialogRunnable(Editor editor) {
+      myEditor = editor;
+    }
+
+    @Override
+    public void run() {
+      AnAction action = ActionManager.getInstance().getAction("ShowReformatFileDialog");
+      DataManager manager = DataManager.getInstance();
+      if (manager != null) {
+        DataContext context = manager.getDataContext(myEditor.getContentComponent());
+        action.actionPerformed(AnActionEvent.createFromAnAction(action, null, "", context));
+      }
     }
   }
 
   private abstract static class MessageBuilder {
-    public abstract String getMessage();
+    public abstract @NlsContexts.HintText String getMessage();
 
     @NotNull
     public abstract Runnable getHyperlinkRunnable();

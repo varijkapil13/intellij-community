@@ -11,22 +11,17 @@ import com.intellij.openapi.util.io.FileUtil.pathsEqual
 import com.intellij.testFramework.registerServiceInstance
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Condition
-import org.gradle.tooling.BuildController
 import org.gradle.tooling.model.BuildModel
-import org.gradle.tooling.model.Model
 import org.gradle.tooling.model.ProjectModel
-import org.gradle.tooling.model.gradle.GradleBuild
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.model.ModelsHolder
 import org.jetbrains.plugins.gradle.model.Project
 import org.jetbrains.plugins.gradle.model.ProjectImportAction
-import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider
 import org.jetbrains.plugins.gradle.service.project.*
 import org.jetbrains.plugins.gradle.tooling.annotation.TargetVersions
 import org.jetbrains.plugins.gradle.tooling.builder.ProjectPropertiesTestModelBuilder.ProjectProperties
 import org.jetbrains.plugins.gradle.util.GradleConstants.SYSTEM_ID
 import org.junit.Test
-import java.io.Serializable
 import java.util.function.Predicate
 
 class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
@@ -92,6 +87,12 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
   fun `test composite project partial re-import`() {
     createAndImportTestCompositeProject()
 
+    // since Gradle 6.8, included (of the "main" build) builds became visible for `buildSrc` project
+    // there are separate TAPI request per `buildSrc` project in a composite
+    // and hence included build models can be handled more than once
+    // should be fixed with https://github.com/gradle/gradle/issues/14563
+    val includedBuildModelsReceivedQuantity = if (isGradleOlderThan("6.8")) 1 else 2
+
     assertReceivedModels(
       projectPath, "project",
       mapOf("name" to "project", "prop_loaded_1" to "val1"),
@@ -105,12 +106,14 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
     assertReceivedModels(
       path("includedBuild"), "includedBuild",
       mapOf("name" to "includedBuild", "prop_loaded_included" to "val1"),
-      mapOf("name" to "includedBuild", "prop_finished_included" to "val2")
+      mapOf("name" to "includedBuild", "prop_finished_included" to "val2"),
+      includedBuildModelsReceivedQuantity
     )
     assertReceivedModels(
       path("includedBuild"), "subProject",
       mapOf("name" to "subProject", "prop_loaded_included" to "val1"),
-      mapOf("name" to "subProject", "prop_finished_included" to "val2")
+      mapOf("name" to "subProject", "prop_finished_included" to "val2"),
+      includedBuildModelsReceivedQuantity
     )
     assertReceivedModels(
       path("includedBuild/buildSrc"), "buildSrc",
@@ -157,12 +160,14 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
     assertReceivedModels(
       path("includedBuild"), "includedBuild",
       mapOf("name" to "includedBuild", "prop_loaded_included" to "val1_1"),
-      mapOf("name" to "includedBuild", "prop_finished_included" to "val2_2")
+      mapOf("name" to "includedBuild", "prop_finished_included" to "val2_2"),
+      includedBuildModelsReceivedQuantity
     )
     assertReceivedModels(
       path("includedBuild"), "subProject",
       mapOf("name" to "subProject", "prop_loaded_included" to "val1_1"),
-      mapOf("name" to "subProject", "prop_finished_included" to "val2_2")
+      mapOf("name" to "subProject", "prop_finished_included" to "val2_2"),
+      includedBuildModelsReceivedQuantity
     )
     assertReceivedModels(
       path("includedBuild/buildSrc"), "buildSrc",
@@ -230,11 +235,28 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
 
     if (currentGradleBaseVersion >= GradleVersion.version("4.8")) {
       if (currentGradleBaseVersion != GradleVersion.version("4.10.3")) {
-        assertSyncViewTreeEquals(
-          "-\n" +
-          " -failed\n" +
-          "  Build cancelled"
-        )
+        assertSyncViewTreeEquals { treeTestPresentation ->
+          assertThat(treeTestPresentation).satisfiesAnyOf(
+            {
+              assertThat(it).isEqualTo("-\n" +
+                                       " -failed\n" +
+                                       "  Build cancelled")
+
+            },
+            {
+              assertThat(it).isEqualTo("-\n" +
+                                       " cancelled")
+
+            },
+            {
+              assertThat(it).startsWith("-\n" +
+                                        " -failed\n" +
+                                        "  Build cancelled\n" +
+                                        "  Could not build ")
+
+            }
+          )
+        }
       }
       assertReceivedModels(projectPath, "project", mapOf("name" to "project", "prop_loaded_1" to "error"))
     }
@@ -271,7 +293,8 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
   private fun assertReceivedModels(
     buildPath: String, projectName: String,
     expectedProjectLoadedModelsMap: Map<String, String>,
-    expectedBuildFinishedModelsMap: Map<String, String>? = null
+    expectedBuildFinishedModelsMap: Map<String, String>? = null,
+    receivedQuantity: Int = 1
   ) {
     val modelConsumer = myProject.getService(ModelConsumer::class.java)
     val projectLoadedPredicate = Predicate<Pair<Project, ProjectLoadedModel>> {
@@ -280,7 +303,7 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
       pathsEqual(project.projectIdentifier.buildIdentifier.rootDir.path, buildPath)
     }
     assertThat(modelConsumer.projectLoadedModels)
-      .haveExactly(1, Condition(projectLoadedPredicate, "project loaded model for '$projectName' at '$buildPath'"))
+      .haveExactly(receivedQuantity, Condition(projectLoadedPredicate, "project loaded model for '$projectName' at '$buildPath'"))
     val (_, projectLoadedModel) = modelConsumer.projectLoadedModels.find(projectLoadedPredicate::test)!!
     assertMapsEqual(expectedProjectLoadedModelsMap, projectLoadedModel.map)
     if (expectedBuildFinishedModelsMap != null) {
@@ -290,7 +313,7 @@ class GradlePartialImportingTest : BuildViewMessagesImportingTestCase() {
         pathsEqual(project.projectIdentifier.buildIdentifier.rootDir.path, buildPath)
       }
       assertThat(modelConsumer.buildFinishedModels)
-        .haveExactly(1, Condition(buildFinishedPredicate, "build finished model for '$projectName' at '$buildPath'"))
+        .haveExactly(receivedQuantity, Condition(buildFinishedPredicate, "build finished model for '$projectName' at '$buildPath'"))
       val (_, buildFinishedModel) = modelConsumer.buildFinishedModels.find(buildFinishedPredicate::test)!!
       assertMapsEqual(expectedBuildFinishedModelsMap, buildFinishedModel.map)
     }
@@ -327,47 +350,9 @@ class TestPartialProjectResolverExtension : AbstractProjectResolverExtension() {
     }
   }
 
-  override fun getProjectsLoadedModelProvider(): ProjectImportModelProvider? {
-    return object : ProjectImportModelProvider {
-      override fun populateProjectModels(
-        controller: BuildController,
-        projectModel: Model,
-        modelConsumer: ProjectImportModelProvider.ProjectModelConsumer
-      ) {
-        val model = controller.getModel(projectModel, ProjectProperties::class.java)
-        modelConsumer.consume(ProjectLoadedModel(model.propertiesMap.filterKeys { it == "name" || it.startsWith("prop_loaded_") }),
-                              ProjectLoadedModel::class.java)
-      }
+  override fun getProjectsLoadedModelProvider() = ProjectLoadedModelProvider()
 
-      override fun populateBuildModels(
-        controller: BuildController,
-        buildModel: GradleBuild,
-        consumer: ProjectImportModelProvider.BuildModelConsumer
-      ) {
-      }
-    }
-  }
-
-  override fun getModelProvider(): ProjectImportModelProvider? {
-    return object : ProjectImportModelProvider {
-      override fun populateProjectModels(
-        controller: BuildController,
-        projectModel: Model,
-        modelConsumer: ProjectImportModelProvider.ProjectModelConsumer
-      ) {
-        val model = controller.getModel(projectModel, ProjectProperties::class.java)
-        modelConsumer.consume(BuildFinishedModel(model.propertiesMap.filterKeys { it == "name" || it.startsWith("prop_finished_") }),
-                              BuildFinishedModel::class.java)
-      }
-
-      override fun populateBuildModels(
-        controller: BuildController,
-        buildModel: GradleBuild,
-        consumer: ProjectImportModelProvider.BuildModelConsumer
-      ) {
-      }
-    }
-  }
+  override fun getModelProvider() = BuildFinishedModelProvider()
 }
 
 internal class TestProjectModelContributor : ProjectModelContributor {
@@ -388,6 +373,3 @@ internal data class ModelConsumer(
   val projectLoadedModels: MutableList<Pair<Project, ProjectLoadedModel>> = mutableListOf(),
   val buildFinishedModels: MutableList<Pair<Project, BuildFinishedModel>> = mutableListOf()
 )
-
-data class ProjectLoadedModel(val map: Map<*, *>) : Serializable
-data class BuildFinishedModel(val map: Map<*, *>) : Serializable

@@ -1,16 +1,20 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 @file:Suppress("PropertyName")
 
 package com.intellij.configurationStore.xml
 
 import com.intellij.configurationStore.deserialize
-import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginsAdvertiser.PluginSet
+import com.intellij.ide.plugins.PluginFeatureService
+import com.intellij.ide.plugins.advertiser.FeaturePluginData
+import com.intellij.ide.plugins.advertiser.KnownExtensions
+import com.intellij.ide.plugins.advertiser.KnownExtensionsService
+import com.intellij.ide.plugins.advertiser.PluginData
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.testFramework.assertions.Assertions.assertThat
-import com.intellij.util.xmlb.annotations.OptionTag
 import com.intellij.util.xmlb.annotations.Property
 import com.intellij.util.xmlb.annotations.Tag
 import com.intellij.util.xmlb.annotations.XMap
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap
 import org.junit.Test
 import java.util.*
 
@@ -274,21 +278,108 @@ internal class XmlSerializerMapTest {
     """, bean)
   }
 
-  @Suppress("SpellCheckingInspection")
   @Test
   fun `no nullize of empty data`() {
-    @Tag("exts")
-    class KnownExtensions {
-      @JvmField
-      @OptionTag
+    val element = JDOMUtil.load("""
+        <extensions>
+          <option name="extensionsMap" />
+        </extensions>
+      """.trimIndent())
+    val result = element.deserialize(KnownExtensions::class.java)
+    assertThat(result.extensionsMap).isNotNull()
+  }
+
+  @Test
+  fun `knownExtensions serialization`() {
+    val pluginData = PluginData("foo", "Foo")
+    val extensions = KnownExtensions(mapOf("foo" to setOf(pluginData)))
+
+    testSerializer(
+      """
+        <extensions>
+          <extensionsMap>
+            <entry key="foo">
+              <plugins>
+                <dataSet>
+                  <plugin pluginId="foo" pluginName="Foo" bundled="false" fromCustomRepository="false" />
+                </dataSet>
+              </plugins>
+            </entry>
+          </extensionsMap>
+        </extensions>
+      """.trimIndent(),
+      extensions,
+    )
+  }
+
+  @Test
+  fun `knownExtensionsService serialization`() {
+    val state = KnownExtensionsService.State()
+    state.extensions = KnownExtensions(mapOf())
+
+    testSerializer(
+      """
+        <knownExtensions>
+          <extensions>
+            <extensionsMap />
+          </extensions>
+        </knownExtensions>
+      """.trimIndent(),
+      state,
+    )
+  }
+
+  @Test
+  fun `featurePluginData serialization`() {
+    val pluginData = FeaturePluginData(
+      "foo",
+      PluginData("foo", "Foo"),
+    )
+
+    testSerializer(
+      """
+        <featurePlugin displayName="foo">
+          <plugin pluginId="foo" pluginName="Foo" bundled="false" fromCustomRepository="false" />
+        </featurePlugin>
+      """.trimIndent(),
+      pluginData,
+    )
+  }
+
+  @Test
+  fun `pluginFeatureService serialization`() {
+    val state = PluginFeatureService.State()
+    state["foo"] = PluginFeatureService.FeaturePluginsList()
+
+    testSerializer(
+      """
+        <pluginFeatures>
+          <features>
+            <entry key="foo">
+              <features />
+            </entry>
+          </features>
+        </pluginFeatures>
+      """.trimIndent(),
+      state,
+    )
+  }
+
+  @Test
+  fun fastUtilObjectIntMap() {
+    @Tag("bean")
+    class Bean {
       @XMap
-      val myExtensions: MutableMap<String, PluginSet> = HashMap()
+      var map = Object2IntOpenHashMap<String>()
     }
 
-    val element = JDOMUtil.load("""<exts>
-      <option name="myExtensions" />
-    </exts>""")
-    val result = element.deserialize(KnownExtensions::class.java)
-    assertThat(result.myExtensions).isNotNull()
+    val bean = Bean()
+    bean.map.put("a", 1)
+    testSerializer("""
+    <bean>
+      <map>
+        <entry key="a" value="1" />
+      </map>
+    </bean>""", bean)
   }
 }

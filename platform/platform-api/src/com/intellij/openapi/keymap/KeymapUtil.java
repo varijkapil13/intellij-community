@@ -1,9 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.keymap;
 
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.InvalidDataException;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
@@ -12,9 +13,7 @@ import com.intellij.openapi.util.registry.RegistryValueListener;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.SmartHashSet;
 import org.intellij.lang.annotations.JdkConstants;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -30,7 +29,6 @@ import static java.awt.event.InputEvent.ALT_DOWN_MASK;
 import static java.awt.event.InputEvent.CTRL_DOWN_MASK;
 
 public final class KeymapUtil {
-
   @NonNls private static final String CANCEL_KEY_TEXT = "Cancel";
   @NonNls private static final String BREAK_KEY_TEXT = "Break";
   @NonNls private static final String SHIFT = "shift";
@@ -141,7 +139,7 @@ public final class KeymapUtil {
   }
 
   @NotNull
-  public static String getKeystrokeText(KeyStroke accelerator) {
+  public static @NlsSafe String getKeystrokeText(KeyStroke accelerator) {
     if (accelerator == null) return "";
     if (isNativeMacShortcuts()) {
       return MacKeymapUtil.getKeyStrokeText(accelerator);
@@ -180,8 +178,8 @@ public final class KeymapUtil {
   private static boolean isNativeMacShortcuts() {
     return SystemInfo.isMac && !isSimplifiedMacShortcuts();
   }
-  
-  private static boolean isSimplifiedMacShortcuts() {
+
+  public static boolean isSimplifiedMacShortcuts() {
     return SystemInfo.isMac && Registry.is("ide.macos.disable.native.shortcut.symbols", false);
   }
 
@@ -326,9 +324,19 @@ public final class KeymapUtil {
   }
 
   @NotNull
-  public static String getFirstKeyboardShortcutText(@NotNull @NonNls String actionId) {
+  public static @NlsSafe String getFirstKeyboardShortcutText(@NotNull @NonNls String actionId) {
     for (Shortcut shortcut : getActiveKeymapShortcuts(actionId).getShortcuts()) {
       if (shortcut instanceof KeyboardShortcut) {
+        return getShortcutText(shortcut);
+      }
+    }
+    return "";
+  }
+
+  @NotNull
+  public static @NlsSafe String getFirstMouseShortcutText(@NotNull @NonNls String actionId) {
+    for (Shortcut shortcut : getActiveKeymapShortcuts(actionId).getShortcuts()) {
+      if (shortcut instanceof MouseShortcut) {
         return getShortcutText(shortcut);
       }
     }
@@ -357,14 +365,14 @@ public final class KeymapUtil {
   }
 
   @NotNull
-  public static String getPreferredShortcutText(Shortcut @NotNull [] shortcuts) {
+  public static @NlsSafe String getPreferredShortcutText(Shortcut @NotNull [] shortcuts) {
     KeyboardShortcut shortcut = ContainerUtil.findInstance(shortcuts, KeyboardShortcut.class);
     return shortcut != null ? getShortcutText(shortcut) :
            shortcuts.length > 0 ? getShortcutText(shortcuts[0]) : "";
   }
 
   @NotNull
-  public static String getShortcutsText(Shortcut @NotNull [] shortcuts) {
+  public static @NlsSafe String getShortcutsText(Shortcut @NotNull [] shortcuts) {
     if (shortcuts.length == 0) {
       return "";
     }
@@ -498,7 +506,7 @@ public final class KeymapUtil {
         public void afterValueChanged(@NotNull RegistryValue value) {
           updateTooltipRequestKey(value);
         }
-      }, Disposer.get("ui"));
+      }, ApplicationManager.getApplication());
 
       updateTooltipRequestKey(ourTooltipKeysProperty);
     }
@@ -569,7 +577,7 @@ public final class KeymapUtil {
     if (shortcuts.length == 0) {
       return Collections.emptySet();
     }
-    Set<KeyStroke> result = new SmartHashSet<>();
+    Set<KeyStroke> result = new HashSet<>();
     for (Shortcut shortcut : shortcuts) {
       if (!(shortcut instanceof KeyboardShortcut)) {
         continue;
@@ -584,13 +592,13 @@ public final class KeymapUtil {
   }
 
   @NotNull
-  public static String createTooltipText(@NotNull String name, @NotNull @NonNls String actionId) {
+  public static @NlsContexts.Tooltip String createTooltipText(@NotNull @NlsContexts.Tooltip String name, @NotNull @NonNls String actionId) {
     String text = getFirstKeyboardShortcutText(actionId);
     return text.isEmpty() ? name : name + " (" + text + ")";
   }
 
   @NotNull
-  public static String createTooltipText(@Nullable String name, @NotNull AnAction action) {
+  public static @NlsSafe String createTooltipText(@Nullable String name, @NotNull AnAction action) {
     String toolTipText = name == null ? "" : name;
     while (StringUtil.endsWithChar(toolTipText, '.')) {
       toolTipText = toolTipText.substring(0, toolTipText.length() - 1);
@@ -739,25 +747,6 @@ public final class KeymapUtil {
       }
       return shortcutSet;
     }
-    return null;
-  }
-
-  /**
-   * Check if {@link AnActionEvent} was called with keyboard shortcut
-   * and if so return string presentation for this shortcut
-   * @param event called event
-   * @return string presentation of shortcut if {@code event} was called with shortcut. In other cases null is returned
-   * @deprecated unused method that is not needed anymore
-   */
-  @Nullable
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  public static String getEventCallerKeystrokeText(@NotNull AnActionEvent event) {
-    if (event.getInputEvent() instanceof KeyEvent) {
-      KeyEvent ke = (KeyEvent)event.getInputEvent();
-      return getKeystrokeText(KeyStroke.getKeyStroke(ke.getKeyCode(), ke.getModifiers()));
-    }
-
     return null;
   }
 }

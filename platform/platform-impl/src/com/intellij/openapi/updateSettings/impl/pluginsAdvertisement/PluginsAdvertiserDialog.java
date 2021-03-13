@@ -17,6 +17,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Function;
 
 /**
  * @author anna
@@ -24,36 +25,45 @@ import java.util.*;
 public final class PluginsAdvertiserDialog extends DialogWrapper {
   private static final Logger LOG = Logger.getInstance(PluginsAdvertiserDialog.class);
 
-  @Nullable private final Project myProject;
-  private final PluginDownloader[] myToInstallPlugins;
-  private final List<? extends IdeaPluginDescriptor> myCustomPlugins;
+  private final @Nullable Project myProject;
+  private final @NotNull SortedSet<PluginDownloader> myPluginToInstall;
+  private final @NotNull List<? extends IdeaPluginDescriptor> myCustomPlugins;
   private final Set<PluginId> mySkippedPlugins = new HashSet<>();
 
   private final PluginManagerMain.PluginEnabler.HEADLESS pluginHelper = new PluginManagerMain.PluginEnabler.HEADLESS();
 
-  PluginsAdvertiserDialog(@Nullable Project project, PluginDownloader[] plugins, List<? extends IdeaPluginDescriptor> customPlugins) {
+  private final @Nullable Function<? super Boolean, Void> myFinishFunction;
+
+  PluginsAdvertiserDialog(@Nullable Project project,
+                          @NotNull Set<PluginDownloader> pluginsToInstall,
+                          @NotNull List<? extends IdeaPluginDescriptor> customPlugins,
+                          @Nullable Function<? super Boolean, Void> finishFunction) {
     super(project);
     myProject = project;
-    Arrays.sort(plugins, (o1, o2) -> o1.getPluginName().compareToIgnoreCase(o2.getPluginName()));
-    myToInstallPlugins = plugins;
+    myPluginToInstall = new TreeSet<>(Comparator.comparing(PluginDownloader::getPluginName, String::compareToIgnoreCase));
+    myPluginToInstall.addAll(pluginsToInstall);
     myCustomPlugins = customPlugins;
+    myFinishFunction = finishFunction;
     setTitle(IdeBundle.message("dialog.title.choose.plugins.to.install.or.enable"));
     init();
   }
 
-  @NotNull
+  PluginsAdvertiserDialog(@Nullable Project project,
+                          @NotNull Set<PluginDownloader> pluginsToInstall,
+                          @NotNull List<? extends IdeaPluginDescriptor> customPlugins) {
+    this(project, pluginsToInstall, customPlugins, null);
+  }
+
   @Override
-  protected JComponent createCenterPanel() {
+  protected @NotNull JComponent createCenterPanel() {
     final DetectedPluginsPanel foundPluginsPanel = new DetectedPluginsPanel() {
       @Override
       protected Set<PluginId> getSkippedPlugins() {
         return mySkippedPlugins;
       }
     };
+    foundPluginsPanel.addAll(myPluginToInstall);
 
-    for (PluginDownloader uploadedPlugin : myToInstallPlugins) {
-      foundPluginsPanel.add(uploadedPlugin);
-    }
     TableUtil.ensureSelectionExists(foundPluginsPanel.getEntryTable());
     return foundPluginsPanel;
   }
@@ -65,10 +75,19 @@ public final class PluginsAdvertiserDialog extends DialogWrapper {
     }
   }
 
-  public boolean doInstallPlugins() {
+  public void doInstallPlugins(boolean showDialog) {
+    if (showDialog) {
+      showAndGet();
+    }
+    else {
+      doInstallPlugins();
+    }
+  }
+
+  private boolean doInstallPlugins() {
     Set<PluginDescriptor> pluginsToEnable = new HashSet<>();
     List<PluginNode> nodes = new ArrayList<>();
-    for (PluginDownloader downloader : myToInstallPlugins) {
+    for (PluginDownloader downloader : myPluginToInstall) {
       PluginDescriptor plugin = downloader.getDescriptor();
       if (!mySkippedPlugins.contains(plugin.getPluginId())) {
         pluginsToEnable.add(plugin);
@@ -92,7 +111,7 @@ public final class PluginsAdvertiserDialog extends DialogWrapper {
     DisabledPluginsState.enablePlugins(pluginsToEnable, true);
     if (!nodes.isEmpty()) {
       try {
-        PluginManagerMain.downloadPlugins(nodes, myCustomPlugins, true, notifyRunnable, pluginHelper, null);
+        PluginManagerMain.downloadPlugins(nodes, myCustomPlugins, true, notifyRunnable, pluginHelper, myFinishFunction);
       }
       catch (IOException e) {
         LOG.error(e);

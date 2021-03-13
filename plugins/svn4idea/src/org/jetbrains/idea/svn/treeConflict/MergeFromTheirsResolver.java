@@ -14,6 +14,7 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.NlsContexts.DialogMessage;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.*;
@@ -27,10 +28,10 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.UIBundle;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.vcsUtil.VcsUtil;
-import org.jetbrains.annotations.CalledInAwt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.concurrency.AsyncPromise;
@@ -98,11 +99,11 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     myTextPatches = emptyList();
   }
 
-  @CalledInAwt
+  @RequiresEdt
   public void execute() {
-    String messageKey =
-      myChange.isMoved() ? "confirmation.resolve.tree.conflict.merge.moved" : "confirmation.resolve.tree.conflict.merge.renamed";
-    String message = message(messageKey, myOldPresentation, myNewPresentation);
+    String message = myChange.isMoved()
+                     ? message("confirmation.resolve.tree.conflict.merge.moved", myOldPresentation, myNewPresentation)
+                     : message("confirmation.resolve.tree.conflict.merge.renamed", myOldPresentation, myNewPresentation);
     int ok = showOkCancelDialog(myVcs.getProject(), message, message("dialog.title.resolve.tree.conflict"), Messages.getQuestionIcon());
     if (Messages.OK != ok) return;
 
@@ -137,7 +138,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     new SvnTreeConflictResolver(myVcs, myOldFilePath, null).resolveSelectMineFull();
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private void convertTextPaths() throws VcsException {
     // revision contents is preloaded, so ok to call in awt
     List<Change> convertedChanges = convertPaths(myTheirsChanges);
@@ -145,7 +146,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     myTheirsChanges.addAll(convertedChanges);
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private void selectPatchesInApplyPatchDialog(@NotNull Consumer<VcsException> callback) {
     LocalChangeList changeList = ChangeListManager.getInstance(myVcs.getProject()).getChangeList(myChange);
     TreeConflictApplyTheirsPatchExecutor patchExecutor = new TreeConflictApplyTheirsPatchExecutor(myVcs, myBaseForPatch);
@@ -180,7 +181,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
                       @Nullable LocalChangeList localList,
                       @Nullable String fileName,
                       @Nullable ThrowableComputable<Map<String, Map<String, CharSequence>>, PatchSyntaxException> additionalInfo) {
-      new Task.Backgroundable(myVcs.getProject(), VcsBundle.getString("patch.apply.progress.title")) {
+      new Task.Backgroundable(myVcs.getProject(), VcsBundle.message("patch.apply.progress.title")) {
         VcsException myException = null;
 
         @Override
@@ -216,7 +217,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     myTextPatches = map(patches, TextFilePatch.class::cast);
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private void selectBinaryFiles() throws VcsException {
     List<Change> converted = convertPaths(myTheirsBinaryChanges);
     if (!converted.isEmpty()) {
@@ -273,7 +274,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
       FilePath path = Objects.requireNonNull(change.getBeforeRevision()).getFile();
       VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByPath(path.getPath());
       if (file == null) {
-        throw new VcsException("Can not delete file: " + path.getPath(), true);
+        throw new VcsException(message("error.can.not.delete.file", path.getPath()), true);
       }
       file.delete(TreeConflictRefreshablePanel.class);
     }
@@ -282,13 +283,13 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
       String parentPath = Objects.requireNonNull(file.getParentPath()).getPath();
       VirtualFile parentFile = VfsUtil.createDirectoryIfMissing(parentPath);
       if (parentFile == null) {
-        throw new VcsException("Can not create directory: " + parentPath, true);
+        throw new VcsException(message("error.can.not.create.directory", parentPath), true);
       }
       VirtualFile child = parentFile.createChildData(TreeConflictRefreshablePanel.class, file.getName());
       byte[] content = ((BinaryContentRevision)change.getAfterRevision()).getBinaryContent();
       // actually it was the fix for IDEA-91572 Error saving merged data: Argument 0 for @NotNull parameter of > com/intellij/
       if (content == null) {
-        throw new VcsException("Can not load Theirs content for file " + file.getPath(), true);
+        throw new VcsException(message("error.can.not.load.theirs.content.for.file", file.getPath()), true);
       }
       child.setBinaryContent(content);
     }
@@ -304,18 +305,17 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     );
   }
 
-  @NotNull
-  private static String getSingleBinaryFileMessage(@NotNull Change change) {
-    String singleMessageKey = FileStatus.DELETED.equals(change.getFileStatus())
-                              ? "dialog.message.merge.from.theirs.delete.binary.file"
-                              : FileStatus.ADDED.equals(change.getFileStatus())
-                                ? "dialog.message.merge.from.theirs.create.binary.file"
-                                : "dialog.message.merge.from.theirs.modify.binary.file";
+  private static @DialogMessage @NotNull String getSingleBinaryFileMessage(@NotNull Change change) {
+    String path = TreeConflictRefreshablePanel.filePath(getFilePath(change));
 
-    return message(singleMessageKey, TreeConflictRefreshablePanel.filePath(getFilePath(change)));
+    return FileStatus.DELETED.equals(change.getFileStatus())
+           ? message("dialog.message.merge.from.theirs.delete.binary.file", path)
+           : FileStatus.ADDED.equals(change.getFileStatus())
+             ? message("dialog.message.merge.from.theirs.create.binary.file", path)
+             : message("dialog.message.merge.from.theirs.modify.binary.file", path);
   }
 
-  @CalledInAwt
+  @RequiresEdt
   @NotNull
   private List<Change> convertPaths(@NotNull List<Change> changes) throws VcsException {
     initAddOption();
@@ -417,7 +417,7 @@ public final class MergeFromTheirsResolver extends BackgroundTaskGroup {
     return filter(committedChanges, changeList -> changeList.getNumber() != min);
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private void initAddOption() {
     ApplicationManager.getApplication().assertIsDispatchThread();
     if (myAdd == null) {

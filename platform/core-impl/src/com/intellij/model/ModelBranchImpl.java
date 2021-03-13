@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.model;
 
+import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.injected.editor.VirtualFileWindow;
-import com.intellij.model.psi.PsiSymbolReference;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
@@ -19,6 +20,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.file.PsiFileImplUtil;
 import com.intellij.psi.search.DelegatingGlobalSearchScope;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -65,6 +67,11 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
 
   void addVfsStructureChange(BranchedVirtualFileImpl file) {
     myVfsChanges.incModificationCount();
+
+    PsiManagerImpl psiManager = (PsiManagerImpl)PsiManager.getInstance(myProject);
+    psiManager.beforeChange(false);
+    psiManager.afterChange(false);
+
     myVfsStructureChanges.add(file);
 
     VfsUtilCore.processFilesRecursively(file, each -> {
@@ -74,7 +81,7 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
   }
 
   @NotNull
-  static ModelPatch performInBranch(@NotNull Consumer<ModelBranch> action, @NotNull ModelBranchImpl branch) {
+  static ModelPatch performInBranch(@NotNull Consumer<? super ModelBranch> action, @NotNull ModelBranchImpl branch) {
     action.accept(branch);
     return new ModelPatch() {
       @Override
@@ -108,7 +115,7 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
     while (prefixEnd > 0) {
       VirtualFile someParent = VirtualFileManager.getInstance().findFileByUrl(url.substring(0, prefixEnd));
       if (someParent != null) {
-        return findFileByUrl(url, findFileCopy(someParent));
+        return findFileByUrl(url, findPhysicalFileCopy(someParent));
       }
       prefixEnd = url.lastIndexOf('/', prefixEnd - 1);
     }
@@ -136,10 +143,27 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
 
   @Override
   @NotNull
-  public BranchedVirtualFileImpl findFileCopy(@NotNull VirtualFile original) {
+  public VirtualFile findFileCopy(@NotNull VirtualFile original) {
+    return original instanceof VirtualFileWindow ? findInjectedFileCopy((VirtualFileWindow)original) : findPhysicalFileCopy(original);
+  }
+
+  @NotNull
+  private VirtualFile findInjectedFileCopy(VirtualFileWindow original) {
+    VirtualFile hostCopy = findPhysicalFileCopy(original.getDelegate());
+    DocumentWindow injectedDoc = original.getDocumentWindow();
+    PsiFile hostPsi = PsiManager.getInstance(myProject).findFile(hostCopy);
+    assert hostPsi != null;
+    PsiElement leaf =
+      InjectedLanguageManager.getInstance(myProject).findInjectedElementAt(hostPsi, injectedDoc.getHostRanges()[0].getStartOffset());
+    assert leaf != null;
+    PsiFile injectedCopy = leaf.getContainingFile();
+    return injectedCopy.getViewProvider().getVirtualFile();
+  }
+
+  @NotNull
+  BranchedVirtualFileImpl findPhysicalFileCopy(@NotNull VirtualFile original) {
     assert ModelBranch.getFileBranch(original) != this;
     return myVFileCopies.computeIfAbsent(original, __ -> {
-      assert !(original instanceof VirtualFileWindow);
       assert original instanceof VirtualFileWithId;
       return new BranchedVirtualFileImpl(this, original, original.getName(), original.isDirectory(), null);
     });
@@ -164,6 +188,10 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
       //noinspection unchecked
       return (T)Objects.requireNonNull(PsiManager.getInstance(myProject).findDirectory(findFileCopy(((PsiDirectory)original).getVirtualFile())));
     }
+    if (original instanceof BranchableSyntheticPsiElement) {
+      //noinspection unchecked
+      return (T)((BranchableSyntheticPsiElement)original).obtainBranchCopy(this);
+    }
 
     PsiFile file = original.getContainingFile();
     assert file != null : original;
@@ -174,15 +202,17 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
 
   @Override
   @NotNull
-  public <T extends PsiSymbolReference> T obtainReferenceCopy(@NotNull T original) {
+  public <T extends PsiReference> T obtainReferenceCopy(@NotNull T original) {
     PsiElement psiCopy = obtainPsiCopy(original.getElement());
     TextRange range = original.getRangeInElement();
     PsiReference[] refs = psiCopy.getReferences();
     T found = findSimilarReference(original, range, refs);
-    if (found == null) throw new AssertionError("Cannot find " + original +
-                                                " of " + original.getClass() +
-                                                " at " + range +
-                                                " in the copy, where references are " + Arrays.toString(refs));
+    if (found == null) {
+      throw new AssertionError("Cannot find " + original +
+                                                  " of " + original.getClass() +
+                                                  " at " + range +
+                                                  " in the copy, where references are " + Arrays.toString(refs));
+    }
     return found;
   }
 
@@ -195,7 +225,6 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
   @Override
   @Nullable
   public <T extends PsiElement> T findOriginalPsi(@NotNull T branched) {
-    assert myMerged;
     if (branched instanceof PsiDirectory) {
       VirtualFile originalDir = findOriginalFile(((PsiDirectory) branched).getVirtualFile());
       if (originalDir == null) return null;
@@ -297,7 +326,7 @@ public abstract class ModelBranchImpl extends UserDataHolderBase implements Mode
 
   private static boolean processModifiedFilesInScope(GlobalSearchScope scope,
                                                      Processor<? super VirtualFile> processor,
-                                                     Collection<ModelBranch> branches) {
+                                                     Collection<? extends ModelBranch> branches) {
     for (ModelBranch branch : branches) {
       for (VirtualFile file : ((ModelBranchImpl)branch).myAffectedFiles) {
         if (scope.contains(file) && !processor.process(file)) {

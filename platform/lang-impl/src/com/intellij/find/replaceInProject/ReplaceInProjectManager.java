@@ -17,6 +17,7 @@ import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
@@ -40,6 +41,7 @@ import com.intellij.usages.*;
 import com.intellij.usages.impl.UsageViewImpl;
 import com.intellij.usages.rules.UsageInFile;
 import com.intellij.util.AdapterProcessor;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -171,9 +173,8 @@ public final class ReplaceInProjectManager {
       super(project, findModel);
     }
 
-    @NotNull
     @Override
-    public String getLongDescriptiveName() {
+    public @Nls @NotNull String getLongDescriptiveName() {
       UsageViewPresentation presentation = FindInProjectUtil.setupViewPresentation(myFindModel);
       return StringUtil.decapitalize(presentation.getToolwindowTitle());
     }
@@ -193,7 +194,7 @@ public final class ReplaceInProjectManager {
   }
 
   public void searchAndShowUsages(@NotNull UsageViewManager manager,
-                                  @NotNull Factory<UsageSearcher> usageSearcherFactory,
+                                  @NotNull Factory<? extends UsageSearcher> usageSearcherFactory,
                                   @NotNull final FindModel findModelCopy,
                                   @NotNull UsageViewPresentation presentation,
                                   @NotNull FindUsagesProcessPresentation processPresentation) {
@@ -393,15 +394,14 @@ public final class ReplaceInProjectManager {
     //replaceContext.getUsageView().addButtonToLowerPane(skipThisFileAction);
   }
 
-  private boolean replaceUsages(@NotNull ReplaceContext replaceContext, @NotNull Collection<Usage> usages) {
+  private boolean replaceUsages(@NotNull ReplaceContext replaceContext, @NotNull Collection<? extends Usage> usages) {
     if (!ensureUsagesWritable(replaceContext, usages)) {
       return true;
     }
 
     int[] replacedCount = {0};
-    final boolean[] success = {true};
-
-    success[0] &= ((ApplicationImpl)ApplicationManager.getApplication()).runWriteActionWithCancellableProgressInDispatchThread(
+    boolean[] success = {true};
+    boolean result = ((ApplicationImpl)ApplicationManager.getApplication()).runWriteActionWithCancellableProgressInDispatchThread(
       FindBundle.message("find.replace.all.confirmation.title"),
       myProject,
       null,
@@ -435,9 +435,10 @@ public final class ReplaceInProjectManager {
             }
           });
         }
+        FileDocumentManager.getInstance().saveAllDocuments();
       }
     );
-
+    success[0] &= result;
     replaceContext.getUsageView().removeUsagesBulk(usages);
     reportNumberReplacedOccurrences(myProject, replacedCount[0]);
     return success[0];

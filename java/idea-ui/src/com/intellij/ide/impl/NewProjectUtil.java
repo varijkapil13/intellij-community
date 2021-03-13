@@ -1,14 +1,11 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
-/*
- * @author max
- */
 package com.intellij.ide.impl;
 
 import com.intellij.ide.JavaUiBundle;
 import com.intellij.ide.SaveAndSyncHandler;
 import com.intellij.ide.util.newProjectWizard.AbstractProjectWizard;
 import com.intellij.ide.util.projectWizard.ProjectBuilder;
+import com.intellij.internal.statistic.service.fus.collectors.FUCounterUsageLogger;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.command.CommandProcessor;
@@ -35,6 +32,7 @@ import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,6 +50,7 @@ public final class NewProjectUtil {
    * @deprecated Use {@link #createNewProject(AbstractProjectWizard)}, projectToClose param is not used.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void createNewProject(@SuppressWarnings("unused") @Nullable Project projectToClose, @NotNull AbstractProjectWizard wizard) {
     createNewProject(wizard);
   }
@@ -71,7 +70,9 @@ public final class NewProjectUtil {
 
   public static Project createFromWizard(@NotNull AbstractProjectWizard wizard, @Nullable Project projectToClose) {
     try {
-      return doCreate(wizard, projectToClose);
+      Project newProject = doCreate(wizard, projectToClose);
+      FUCounterUsageLogger.getInstance().logEvent(newProject, "new.project.wizard", "project.created");
+      return newProject;
     }
     catch (IOException e) {
       UIUtil.invokeLaterIfNeeded(() -> Messages.showErrorDialog(e.getMessage(),
@@ -148,7 +149,7 @@ public final class NewProjectUtil {
 
       if (!ApplicationManager.getApplication().isUnitTestMode()) {
         boolean needToOpenProjectStructure = projectBuilder == null || projectBuilder.isOpenProjectSettingsAfter();
-        StartupManager.getInstance(newProject).registerPostStartupActivity(() -> {
+        StartupManager.getInstance(newProject).runAfterOpened(() -> {
           // ensure the dialog is shown after all startup activities are done
           ApplicationManager.getApplication().invokeLater(() -> {
             if (needToOpenProjectStructure) {
@@ -206,6 +207,7 @@ public final class NewProjectUtil {
       LanguageLevelProjectExtension ext = LanguageLevelProjectExtension.getInstance(project);
       if (extension.isDefault() || maxLevel.compareTo(ext.getLanguageLevel()) < 0) {
         ext.setLanguageLevel(maxLevel);
+        ext.setDefault(true);
       }
     }
   }

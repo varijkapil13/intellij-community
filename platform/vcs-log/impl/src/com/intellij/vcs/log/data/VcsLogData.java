@@ -29,11 +29,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.*;
 
 public class VcsLogData implements Disposable, VcsLogDataProvider {
   private static final Logger LOG = Logger.getInstance(VcsLogData.class);
@@ -49,7 +49,7 @@ public class VcsLogData implements Disposable, VcsLogDataProvider {
    * Current user name, as specified in the VCS settings.
    * It can be configured differently for different roots => store in a map.
    */
-  private final Map<VirtualFile, VcsUser> myCurrentUser = new HashMap<>();
+  private final Map<VirtualFile, VcsUser> myCurrentUser = new ConcurrentHashMap<>();
 
   /**
    * Cached details of the latest commits.

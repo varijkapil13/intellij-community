@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.customize;
 
 import com.intellij.CommonBundle;
@@ -7,12 +7,17 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.plugins.IdeaPluginDependency;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.progress.util.AbstractProgressIndicatorExBase;
 import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.updateSettings.impl.PluginDownloader;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.text.HtmlBuilder;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
@@ -23,6 +28,7 @@ import com.intellij.ui.components.labels.LinkListener;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -36,6 +42,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+import static com.intellij.openapi.util.text.HtmlChunk.body;
+import static com.intellij.openapi.util.text.HtmlChunk.html;
 
 public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWizardStep {
   private static final int COLS = 3;
@@ -54,9 +64,9 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
   }
 
   private void onPluginGroupsLoaded() {
-    Map<String, IdeaPluginDescriptor> pluginsFromRepository = ContainerUtil.map2Map(
+    Map<PluginId, IdeaPluginDescriptor> pluginsFromRepository = ContainerUtil.map2Map(
       myPluginGroups.getPluginsFromRepository(),
-      descriptor -> Pair.create(descriptor.getPluginId().getIdString(), descriptor)
+      descriptor -> Pair.create(descriptor.getPluginId(), descriptor)
     );
     if (pluginsFromRepository.isEmpty()) {
       myInProgressLabel.setText(IdeBundle.message("label.cannot.get.featured.plugins.description.online"));
@@ -67,7 +77,7 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
     JBScrollPane scrollPane = CustomizePluginsStepPanel.createScrollPane(gridPanel);
 
     Map<String, String> config = myPluginGroups.getFeaturedPlugins();
-    for (Map.Entry<String, String> entry : config.entrySet()) {
+    for (Map.Entry<@NlsSafe String, @Nls String> entry : config.entrySet()) {
       JPanel groupPanel = new JPanel(new GridBagLayout());
       GridBagConstraints gbc = new GridBagConstraints();
       gbc.fill = GridBagConstraints.BOTH;
@@ -75,18 +85,11 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
       gbc.gridwidth = GridBagConstraints.REMAINDER;
       gbc.weightx = 1;
 
-      String title = entry.getKey();
-      String s = entry.getValue();
-      int i = s.indexOf(':');
-      String topic = s.substring(0, i);
-      int j = s.indexOf(':', i + 1);
-      String description = s.substring(i + 1, j);
-      final String pluginId = PluginGroups.parsePluginId(s);
-      IdeaPluginDescriptor foundDescriptor = pluginsFromRepository.get(pluginId);
-      if (foundDescriptor == null || PluginManagerCore.isBrokenPlugin(foundDescriptor)) {
+      PluginGroups.PluginGroupDescription groupDescription = new PluginGroups.PluginGroupDescription(entry.getValue());
+      final IdeaPluginDescriptor descriptor = pluginsFromRepository.get(groupDescription.getPluginId());
+      if (descriptor == null || PluginManagerCore.isBrokenPlugin(descriptor)) {
         continue;
       }
-      final IdeaPluginDescriptor descriptor = foundDescriptor;
 
       List<IdeaPluginDescriptor> dependentDescriptors = new ArrayList<>();
       boolean failedToFindDependencies = false;
@@ -96,7 +99,7 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
         if (PluginManagerCore.isModuleDependency(id) || myPluginGroups.findPlugin(id) != null) {
           continue;
         }
-        IdeaPluginDescriptor dependentDescriptor = pluginsFromRepository.get(id.getIdString());
+        IdeaPluginDescriptor dependentDescriptor = pluginsFromRepository.get(id);
         if (dependentDescriptor == null || PluginManagerCore.isBrokenPlugin(dependentDescriptor)) {
           failedToFindDependencies = true;
           break;
@@ -108,44 +111,49 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
       }
 
       final boolean isVIM = PluginGroups.IDEA_VIM_PLUGIN_ID.equals(descriptor.getPluginId().getIdString());
-      boolean isCloud = "#Cloud".equals(topic);
+      boolean isCloud = "#Cloud".equals(groupDescription.getTopic());
 
+      final String title;
+      final String description;
+      final String topic;
       if (isCloud) {
         title = descriptor.getName();
-        description = StringUtil.defaultIfEmpty(descriptor.getDescription(), "No description available");
-        topic = StringUtil.defaultIfEmpty(descriptor.getCategory(), "Unknown");
+        description = StringUtil.defaultIfEmpty(descriptor.getDescription(), IdeBundle.message("label.no.description.available"));
+        topic = StringUtil.defaultIfEmpty(descriptor.getCategory(), IdeBundle.message("label.plugin.descriptor.category.unknown"));
+      }
+      else {
+        title = entry.getKey();
+        description = groupDescription.getDescription();
+        topic = groupDescription.getTopic();
       }
 
-      JLabel titleLabel = new JLabel("<html><body><h2 style=\"text-align:left;\">" + title + "</h2></body></html>");
-      JLabel topicLabel = new JLabel("<html><body><h4 style=\"text-align:left;color:#808080;font-weight:bold;\">" + topic + "</h4></body></html>");
+      HtmlBuilder titleHtml =
+        new HtmlBuilder().append(html().child(body().child(HtmlChunk.tag("h2").attr("style", "text-align:left;").addText(title))));
+      JLabel titleLabel = new JLabel(titleHtml.toString());
+      HtmlBuilder topicHtml =
+        new HtmlBuilder().append(html().child(body().child(
+          HtmlChunk.tag("h4").attr("style", "text-align:left;color:#808080;font-weight:bold;").addText(topic)
+        )));
+      JLabel topicLabel = new JLabel(topicHtml.toString());
 
       JLabel descriptionLabel = createHTMLLabel(description);
 
-      StringBuilder dependenciesLabelText = new StringBuilder();
-      if (dependentDescriptors.size() > 1) {
-        dependenciesLabelText.append("With dependencies: ");
+      String dependenciesLabelText = "";
+      if (!dependentDescriptors.isEmpty()) {
+        String descriptors = dependentDescriptors.stream().map(PluginDescriptor::getName).collect(Collectors.joining(", "));
+        dependenciesLabelText = IdeBundle.message("label.text.plugin.dependencies", dependentDescriptors.size(), descriptors);
       }
-      else if (dependentDescriptors.size() == 1) {
-        dependenciesLabelText.append("With dependency: ");
-      }
-      for (int k = 0; k < dependentDescriptors.size(); k++) {
-        IdeaPluginDescriptor dependentDescriptor = dependentDescriptors.get(k);
-        if (k > 0) {
-          dependenciesLabelText.append(", ");
-        }
-        dependenciesLabelText.append(dependentDescriptor.getName());
-      }
-      JLabel dependenciesLabel = createHTMLLabel(dependenciesLabelText.toString());
+      JLabel dependenciesLabel = createHTMLLabel(dependenciesLabelText);
       if (!SystemInfo.isWindows) UIUtil.applyStyle(UIUtil.ComponentStyle.SMALL, dependenciesLabel);
 
       JLabel warningLabel = null;
       if (isVIM || isCloud) {
         if (isCloud) {
-          warningLabel = createHTMLLabel("From your JetBrains account");
+          warningLabel = createHTMLLabel(IdeBundle.message("label.from.your.jetbrains.account"));
           warningLabel.setIcon(AllIcons.General.BalloonInformation);
         }
         else {
-          warningLabel = createHTMLLabel("Recommended only if you are<br> familiar with Vim.");
+          warningLabel = createHTMLLabel(IdeBundle.message("label.recommended.only.if.you.are.br.familiar.with.vim"));
           warningLabel.setIcon(AllIcons.General.BalloonWarning);
         }
 
@@ -274,7 +282,7 @@ public final class CustomizeFeaturedPluginsStepPanel extends AbstractCustomizeWi
   }
 
   @NotNull
-  private static JLabel createHTMLLabel(final String text) {
+  private static JLabel createHTMLLabel(final @NlsContexts.Label String text) {
     return new JLabel("<html><body>" + text + "</body></html>") {
       @Override
       public Dimension getPreferredSize() {

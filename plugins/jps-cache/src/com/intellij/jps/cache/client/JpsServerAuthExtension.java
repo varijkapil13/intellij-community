@@ -1,5 +1,6 @@
 package com.intellij.jps.cache.client;
 
+import com.intellij.jps.cache.JpsCacheBundle;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
@@ -17,7 +18,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Map;
 
 import static com.intellij.execution.process.ProcessIOExecutorService.INSTANCE;
-import static com.intellij.jps.cache.ui.JpsLoaderNotifications.STICKY_NOTIFICATION_GROUP;
+import static com.intellij.jps.cache.ui.JpsLoaderNotifications.ATTENTION;
 
 /**
  * Extension point which provides authentication data for requests to the JPS cache server
@@ -62,11 +63,10 @@ public interface JpsServerAuthExtension {
         project.putUserData(NOTIFICATION_SHOWN_KEY, Boolean.TRUE);
         ApplicationManager.getApplication().invokeLater(() -> {
           String message =
-            "<a href=\"https://plugins.jetbrains.com/plugin/14567-jetbrains-internal-authentication\">JetBrains Internal Authentication</a> " +
-            " is required for the correct work of the plugin";
-          Notification notification = STICKY_NOTIFICATION_GROUP.createNotification("Jps Caches Downloader", message,
-                                                                                   NotificationType.WARNING,
-                                                                                   NotificationListener.URL_OPENING_LISTENER);
+            JpsCacheBundle.message("notification.content.internal.authentication.plugin.required.for.correct.work.plugin");
+          Notification notification = ATTENTION.createNotification(JpsCacheBundle.message("notification.title.jps.caches.downloader"), message,
+            NotificationType.WARNING,
+            NotificationListener.URL_OPENING_LISTENER);
           Notifications.Bus.notify(notification, project);
         });
       }

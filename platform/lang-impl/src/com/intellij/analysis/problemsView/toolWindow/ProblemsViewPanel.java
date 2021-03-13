@@ -1,16 +1,20 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.analysis.problemsView.toolWindow;
 
+import com.intellij.codeInsight.daemon.impl.IntentionsUI;
+import com.intellij.codeWithMe.ClientId;
 import com.intellij.ide.DefaultTreeExpander;
 import com.intellij.ide.TreeExpander;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ToggleOptionAction.Option;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorActivityManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.text.HtmlBuilder;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ex.ToolWindowEx;
@@ -35,8 +39,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static com.intellij.openapi.application.ApplicationManager.getApplication;
@@ -48,10 +54,11 @@ import static com.intellij.util.OpenSourceUtil.navigate;
 import static javax.swing.tree.TreeSelectionModel.SINGLE_TREE_SELECTION;
 
 class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProvider {
-  private static final Logger LOG = Logger.getInstance(ProblemsViewPanel.class);
+  protected final ClientId myClientId = ClientId.getCurrent();
+
   private final Project myProject;
   private final ProblemsViewState myState;
-  private final Supplier<String> myName;
+  private final Supplier<@NlsContexts.TabTitle String> myName;
   private final ProblemsTreeModel myTreeModel = new ProblemsTreeModel(this);
   private final ProblemsViewPreview myPreview = new ProblemsViewPreview(this);
   private final JPanel myPanel;
@@ -59,10 +66,12 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
   private final Insets myToolbarInsets = JBUI.insetsRight(1);
   private final Tree myTree;
   private final TreeExpander myTreeExpander;
+  private final AtomicReference<Long> myShowTime = new AtomicReference<>();
   private final SingleAlarm mySelectionAlarm = new SingleAlarm(() -> {
-    OpenFileDescriptor descriptor = getSelectedDescriptor();
-    updateAutoscroll(descriptor);
-    updatePreview(descriptor);
+    ProblemNode node = TreeUtil.getLastUserObject(ProblemNode.class, getTree().getSelectionPath());
+    if (node != null) ProblemsViewStatsCollector.problemSelected(this, node.getProblem());
+    updateAutoscroll();
+    updatePreview();
   }, 50, stateForComponent(this), this);
   private final SingleAlarm myUpdateAlarm = new SingleAlarm(() -> {
     ToolWindow window = ProblemsView.getToolWindow(getProject());
@@ -88,14 +97,14 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
     @Override
     public void setSelected(boolean selected) {
       myState.setAutoscrollToSource(selected);
-      if (selected) updateAutoscroll(getSelectedDescriptor());
+      if (selected) updateAutoscroll();
     }
   };
   private final Option myShowPreview = new Option() {
     @Override
     public boolean isEnabled() {
-      OpenFileDescriptor descriptor = getSelectedDescriptor();
-      return descriptor != null && null != ProblemsView.getDocument(getProject(), descriptor.getFile());
+      VirtualFile file = getSelectedFile();
+      return file != null && null != ProblemsView.getDocument(getProject(), file);
     }
 
     @Override
@@ -111,7 +120,7 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
     @Override
     public void setSelected(boolean selected) {
       myState.setShowPreview(selected);
-      updatePreview(getSelectedDescriptor());
+      updatePreview();
     }
   };
   @SuppressWarnings("unused")
@@ -124,6 +133,18 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
     @Override
     public void setSelected(boolean selected) {
       myState.setSortFoldersFirst(selected);
+      myTreeModel.setComparator(createComparator());
+    }
+  };
+  private final Option mySortByGroupId = new Option() {
+    @Override
+    public boolean isSelected() {
+      return myState.getSortByGroupId();
+    }
+
+    @Override
+    public void setSelected(boolean selected) {
+      myState.setSortByGroupId(selected);
       myTreeModel.setComparator(createComparator());
     }
   };
@@ -186,7 +207,8 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
 
   @Override
   public void dispose() {
-    myPreview.preview(null, false);
+    visibilityChangedTo(false);
+    myPreview.preview(false);
   }
 
   @Override
@@ -198,12 +220,18 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
       VirtualFile file = CommonDataKeys.VIRTUAL_FILE.getData(this);
       return file == null ? null : getPreview().findFileEditor(file, getProject());
     }
-    OpenFileDescriptor descriptor = getSelectedDescriptor();
-    if (descriptor != null) {
-      if (CommonDataKeys.NAVIGATABLE.is(dataId)) return descriptor;
-      if (CommonDataKeys.VIRTUAL_FILE.is(dataId)) return descriptor.getFile();
-      if (CommonDataKeys.NAVIGATABLE_ARRAY.is(dataId)) return new Navigatable[]{descriptor};
-      if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) return new VirtualFile[]{descriptor.getFile()};
+    Node node = getSelectedNode();
+    if (node != null) {
+      if (CommonDataKeys.NAVIGATABLE.is(dataId)) return node.getNavigatable();
+      if (CommonDataKeys.VIRTUAL_FILE.is(dataId)) return node.getVirtualFile();
+      if (CommonDataKeys.NAVIGATABLE_ARRAY.is(dataId)) {
+        Navigatable navigatable = node.getNavigatable();
+        return navigatable == null ? null : new Navigatable[]{navigatable};
+      }
+      if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) {
+        VirtualFile file = node.getVirtualFile();
+        return file == null ? null : new VirtualFile[]{file};
+      }
     }
     return null;
   }
@@ -216,10 +244,12 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
     return null;
   }
 
-  @NotNull String getName(int count) {
+  @NotNull @NlsContexts.TabTitle String getName(int count) {
     String name = myName.get();
     if (count <= 0) return name;
-    return "<html><body>" + name + " <font color='" + toHtmlColor(UIUtil.getInactiveTextColor()) + "'>" + count + "</font></body></html>";
+    return new HtmlBuilder().append(name).append(" ").append(
+      HtmlChunk.tag("font").attr("color", toHtmlColor(UIUtil.getInactiveTextColor())).addText(String.valueOf(count))
+    ).wrapWithHtmlBody().toString();
   }
 
   @Override
@@ -263,13 +293,13 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
     myToolbarInsets.right = !vertical ? scale(1) : 0;
     myToolbarInsets.bottom = vertical ? scale(1) : 0;
     myPanel.add(vertical ? BorderLayout.NORTH : BorderLayout.WEST, myToolbar.getComponent());
-    updatePreview(getSelectedDescriptor());
+    updatePreview();
   }
 
   void selectionChangedTo(boolean selected) {
     if (selected) {
       myTreeModel.setComparator(createComparator());
-      updatePreview(getSelectedDescriptor());
+      updatePreview();
 
       ToolWindow window = ProblemsView.getToolWindow(getProject());
       if (window instanceof ToolWindowEx) {
@@ -277,45 +307,68 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
         ((ToolWindowEx)window).setAdditionalGearActions(group);
       }
     }
+    visibilityChangedTo(selected);
   }
 
-  private @Nullable OpenFileDescriptor getSelectedDescriptor() {
-    Object object = TreeUtil.getLastUserObject(getTree().getSelectionPath());
-    if (object instanceof FileNode) return getDescriptor((FileNode)object);
-    if (object instanceof ProblemNode) return getDescriptor((ProblemNode)object);
-    return null;
-  }
-
-  private @Nullable OpenFileDescriptor getDescriptor(@NotNull FileNode node) {
-    return getDescriptor(node.getFile(), -1);
-  }
-
-  private @Nullable OpenFileDescriptor getDescriptor(@NotNull ProblemNode node) {
-    return getDescriptor(node.getFile(), node.getOffset());
-  }
-
-  private @Nullable OpenFileDescriptor getDescriptor(@NotNull VirtualFile file, int offset) {
-    Document document = ProblemsView.getDocument(getProject(), file);
-    if (document == null) return null;
-    if (offset < 0) return new OpenFileDescriptor(getProject(), file);
-    int length = document.getTextLength();
-    if (offset <= length) return new OpenFileDescriptor(getProject(), file, offset);
-    LOG.warn("offset is bigger then document length: " + file);
-    return new OpenFileDescriptor(getProject(), file, length);
-  }
-
-  private void updateAutoscroll(@Nullable OpenFileDescriptor descriptor) {
-    if (descriptor != null && UIUtil.isFocusAncestor(this) && isNotNullAndSelected(getAutoscrollToSource())) {
-      invokeLater(() -> navigate(false, descriptor));
+  void visibilityChangedTo(boolean visible) {
+    if (visible) {
+      myShowTime.set(System.nanoTime());
+      ProblemsViewStatsCollector.tabShown(this);
+    }
+    else {
+      Long time = myShowTime.getAndSet(null);
+      if (time != null) ProblemsViewStatsCollector.tabHidden(this, System.nanoTime() - time);
+      IntentionsUI.getInstance(getProject()).hide();
     }
   }
 
-  private void updatePreview(@Nullable OpenFileDescriptor descriptor) {
-    Editor editor = myPreview.preview(descriptor, isNotNullAndSelected(getShowPreview()));
-    if (editor != null && descriptor != null) {
+  private static @Nullable Node getNode(@Nullable TreePath path) {
+    return TreeUtil.getLastUserObject(Node.class, path);
+  }
+
+  private @Nullable Node getSelectedNode() {
+    return getNode(getTree().getSelectionPath());
+  }
+
+  @Nullable VirtualFile getSelectedFile() {
+    Node node = getSelectedNode();
+    return node == null ? null : node.getVirtualFile();
+  }
+
+  private boolean isActiveTab() {
+    ToolWindow window = ProblemsView.getToolWindow(getProject());
+    if (window == null || !window.isActive()) return false;
+    Content content = window.getContentManager().getSelectedContent();
+    if (content == null) return false;
+    return SwingUtilities.isDescendingFrom(this, content.getComponent());
+  }
+
+  private void updateAutoscroll() {
+    if (isActiveTab() && isNotNullAndSelected(getAutoscrollToSource())) {
       invokeLater(() -> {
-        if (editor.getComponent().isShowing()) {
-          descriptor.navigateIn(editor);
+        Node node = getSelectedNode();
+        Navigatable navigatable = node == null ? null : node.getNavigatable();
+        if (navigatable != null && navigatable.canNavigateToSource()) {
+          ClientId.withClientId(myClientId, () -> {
+            navigate(false, navigatable);
+          });
+        }
+      });
+    }
+  }
+
+  private void updatePreview() {
+    Editor editor = myPreview.preview(isNotNullAndSelected(getShowPreview()));
+    if (editor != null) {
+      invokeLater(() -> {
+        if (EditorActivityManager.getInstance().isVisible(editor)) {
+          Node node = getSelectedNode();
+          OpenFileDescriptor descriptor = node == null ? null : node.getDescriptor();
+          if (descriptor != null) {
+            ClientId.withClientId(myClientId, () -> {
+              descriptor.navigateIn(editor);
+            });
+          }
         }
       });
     }
@@ -328,6 +381,7 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
   @NotNull Comparator<Node> createComparator() {
     return new NodeComparator(
       isNullableOrSelected(getSortFoldersFirst()),
+      isNotNullAndSelected(getSortByGroupId()),
       isNullableOrSelected(getSortBySeverity()),
       isNotNullAndSelected(getSortByName()));
   }
@@ -342,6 +396,10 @@ class ProblemsViewPanel extends OnePixelSplitter implements Disposable, DataProv
 
   @Nullable Option getSortFoldersFirst() {
     return null; // TODO:malenkov - support file hierarchy & mySortFoldersFirst;
+  }
+
+  @Nullable Option getSortByGroupId() {
+    return this instanceof HighlightingPanel ? mySortByGroupId : null;
   }
 
   @Nullable Option getSortBySeverity() {

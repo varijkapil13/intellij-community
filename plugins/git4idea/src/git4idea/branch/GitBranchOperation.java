@@ -48,6 +48,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 
 import static com.intellij.util.ObjectUtils.chooseNotNull;
+import static git4idea.GitNotificationIdsHolder.BRANCH_OPERATION_ERROR;
+import static git4idea.GitNotificationIdsHolder.BRANCH_OPERATION_SUCCESS;
 import static git4idea.GitUtil.getRepositoryManager;
 import static java.util.stream.Collectors.toList;
 
@@ -180,7 +182,7 @@ abstract class GitBranchOperation {
   }
 
   protected void notifySuccess(@NotNull @NlsContexts.NotificationContent String message) {
-    VcsNotifier.getInstance(myProject).notifySuccess(message);
+    VcsNotifier.getInstance(myProject).notifySuccess(BRANCH_OPERATION_SUCCESS, "", message);
   }
 
   protected void notifySuccess() {
@@ -194,7 +196,7 @@ abstract class GitBranchOperation {
   /**
    * Show fatal error as a notification or as a dialog with rollback proposal.
    */
-  protected void fatalError(@NotNull String title, @NotNull String message) {
+  protected void fatalError(@NotNull @NlsContexts.NotificationTitle String title, @NotNull @NlsContexts.NotificationContent String message) {
     if (wereSuccessful())  {
       showFatalErrorDialogWithRollback(title, message);
     }
@@ -203,19 +205,20 @@ abstract class GitBranchOperation {
     }
   }
 
-  protected void showFatalErrorDialogWithRollback(@NotNull final String title, @NotNull final String message) {
+  protected void showFatalErrorDialogWithRollback(@NotNull @NlsContexts.DialogTitle String title,
+                                                  @NotNull @NlsContexts.DialogMessage String message) {
     boolean rollback = myUiHandler.notifyErrorWithRollbackProposal(title, message, getRollbackProposal());
     if (rollback) {
       rollback();
     }
   }
 
-  protected void showFatalNotification(@NotNull String title, @NotNull String message) {
+  protected void showFatalNotification(@NotNull @NlsContexts.NotificationTitle String title, @NotNull @NlsContexts.NotificationContent String message) {
     notifyError(title, message);
   }
 
-  protected void notifyError(@NotNull String title, @NotNull String message) {
-    VcsNotifier.getInstance(myProject).notifyError(title, message);
+  protected void notifyError(@NotNull @NlsContexts.NotificationTitle String title, @NotNull @NlsContexts.NotificationContent String message) {
+    VcsNotifier.getInstance(myProject).notifyError(BRANCH_OPERATION_ERROR, title, message);
   }
 
   @NotNull

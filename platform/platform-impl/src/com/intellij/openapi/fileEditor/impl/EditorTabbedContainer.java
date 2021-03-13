@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.ide.DataManager;
@@ -12,6 +12,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
@@ -23,6 +24,7 @@ import com.intellij.openapi.fileEditor.impl.text.FileDropHandler;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VfsUtil;
@@ -30,18 +32,20 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.ComponentWithMnemonics;
 import com.intellij.ui.InplaceButton;
-import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.docking.DockContainer;
 import com.intellij.ui.docking.DockManager;
 import com.intellij.ui.docking.DockableContent;
 import com.intellij.ui.docking.DragSession;
+import com.intellij.ui.docking.impl.DockManagerImpl;
 import com.intellij.ui.tabs.*;
 import com.intellij.ui.tabs.impl.*;
 import com.intellij.ui.tabs.impl.tabsLayout.TabsLayoutInfo;
 import com.intellij.ui.tabs.impl.tabsLayout.TabsLayoutSettingsManager;
+import com.intellij.util.SlowOperations;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.TimedDeadzone;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -50,7 +54,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
-import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
@@ -143,8 +146,13 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
   }
 
   @NotNull
-  public static DockableEditor createDockableEditor(Project project, Image image, VirtualFile file, Presentation presentation, EditorWindow window) {
-    return new DockableEditor(project, image, file, presentation, window.getSize(), window.isFilePinned(file));
+  public static DockableEditor createDockableEditor(Project project,
+                                                    Image image,
+                                                    VirtualFile file,
+                                                    Presentation presentation,
+                                                    EditorWindow window,
+                                                    boolean isNorthPanelAvailable) {
+    return new DockableEditor(project, image, file, presentation, window.getSize(), window.isFilePinned(file), isNorthPanelAvailable);
   }
 
   @NotNull
@@ -175,10 +183,9 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     myTabs.getTabAt(index).setDefaultForeground(color);
   }
 
-  void setWaveColor(int index, @Nullable Color color) {
+  void setTextAttributes(int index, @Nullable TextAttributes attributes) {
     TabInfo tab = myTabs.getTabAt(index);
-    tab.setDefaultStyle(color == null ? SimpleTextAttributes.STYLE_PLAIN : SimpleTextAttributes.STYLE_WAVED);
-    tab.setDefaultWaveColor(color);
+    tab.setDefaultAttributes(attributes);
   }
 
   void setIconAt(int index, Icon icon) {
@@ -189,11 +196,11 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     return myTabs.getTabAt(index).getIcon();
   }
 
-  void setTitleAt(int index, @NotNull String text) {
+  void setTitleAt(int index, @NlsContexts.TabTitle @NotNull String text) {
     myTabs.getTabAt(index).setText(text);
   }
 
-  void setToolTipTextAt(int index, String text) {
+  void setToolTipTextAt(int index, @NlsContexts.Tooltip String text) {
     myTabs.getTabAt(index).setTooltipText(text);
   }
 
@@ -253,7 +260,7 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
   public void insertTab(@NotNull VirtualFile file,
                         Icon icon,
                         @NotNull JComponent component,
-                        @Nullable String tooltip,
+                        @Nullable @NlsContexts.Tooltip String tooltip,
                         int indexToInsert,
                         @NotNull Disposable parentDisposable) {
     TabInfo tab = myTabs.findInfo(file);
@@ -262,7 +269,7 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     }
 
     tab = new TabInfo(component)
-      .setText(EditorTabPresentationUtil.getEditorTabTitle(myProject, file, myWindow))
+      .setText(SlowOperations.allowSlowOperations(() -> EditorTabPresentationUtil.getEditorTabTitle(myProject, file, myWindow)))
       .setTabColor(EditorTabPresentationUtil.getEditorTabBackgroundColor(myProject, file, myWindow))
       .setIcon(UISettings.getInstance().getShowFileIconInTabs() ? icon : null)
       .setTooltipText(tooltip)
@@ -315,30 +322,17 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     }
 
     @Override
-    public void putInfo(@NotNull Map<String, String> info) {
+    public void putInfo(@NotNull Map<? super String, ? super String> info) {
       info.put("editorTab", myTab.getText());
     }
   }
 
   /** @deprecated Use {@link EditorTabPresentationUtil#getEditorTabTitle(Project, VirtualFile, EditorWindow)} */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @NotNull
   public static String calcTabTitle(@NotNull Project project, @NotNull VirtualFile file) {
     return EditorTabPresentationUtil.getEditorTabTitle(project, file, null);
-  }
-
-  /** @deprecated Use {@link EditorTabPresentationUtil#getUniqueEditorTabTitle(Project, VirtualFile, EditorWindow)} */
-  @Deprecated
-  @NotNull
-  public static String calcFileName(@NotNull Project project, @NotNull VirtualFile file) {
-    return EditorTabPresentationUtil.getUniqueEditorTabTitle(project, file, null);
-  }
-
-  /** @deprecated Use {@link EditorTabPresentationUtil#getEditorTabBackgroundColor(Project, VirtualFile, EditorWindow)} */
-  @Deprecated
-  @Nullable
-  public static Color calcTabColor(@NotNull Project project, @NotNull VirtualFile file) {
-    return EditorTabPresentationUtil.getEditorTabBackgroundColor(project, file, null);
   }
 
   public Component getComponentAt(int i) {
@@ -422,7 +416,7 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
         if (!(deepestComponent instanceof InplaceButton)) {
           myActionClickCount++;
         }
-        if (myActionClickCount > 1 && !isFloating()) {
+        if (myActionClickCount > 1) {
           doHideAll(e);
         }
       }
@@ -443,7 +437,22 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
   private static void doHideAll(@NotNull MouseEvent e) {
     if (!Registry.is("editor.maximize.on.double.click")) return;
     ActionManager mgr = ActionManager.getInstance();
-    mgr.tryToExecute(mgr.getAction("HideAllWindows"), e, null, ActionPlaces.UNKNOWN, true);
+    mgr.tryToExecute(mgr.getAction("HideAllWindows"), e, null, ActionPlaces.EDITOR_TAB, true);
+  }
+
+  public void processSplit() {
+    final TabInfo tabInfo = this.myTabs.getSelectedInfo();
+    if (tabInfo == null) {
+      return;
+    }
+
+    Image img = JBTabsImpl.getComponentImage(tabInfo);
+    VirtualFile file = (VirtualFile)tabInfo.getObject();
+    Presentation presentation = new Presentation(tabInfo.getText());
+    presentation.setIcon(tabInfo.getIcon());
+    EditorWithProviderComposite windowFileComposite = myWindow.findFileComposite(file);
+    FileEditor[] editors = windowFileComposite != null ? windowFileComposite.getEditors() : FileEditor.EMPTY_ARRAY;
+    final DockableEditor dockableEditor = createDockableEditor(myProject, img, file, presentation, myWindow, DockManagerImpl.isNorthPanelAvailable(editors));
   }
 
   class MyDragOutDelegate implements TabInfo.DragOutDelegate {
@@ -458,15 +467,24 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
       if (previousSelection == null) {
         previousSelection = myTabs.getToSelectOnRemoveOf(info);
       }
+      int dragStartIndex = myTabs.getIndexOf(info);
+      boolean isPinnedAtStart = info.isPinned();
       info.setHidden(true);
       if (previousSelection != null) {
         myTabs.select(previousSelection, true);
       }
 
       myFile = (VirtualFile)info.getObject();
+      myFile.putUserData(EditorWindow.DRAG_START_INDEX_KEY, dragStartIndex);
+      myFile.putUserData(EditorWindow.DRAG_START_LOCATION_HASH_KEY, System.identityHashCode(myTabs));
+      myFile.putUserData(EditorWindow.DRAG_START_PINNED_KEY, isPinnedAtStart);
       Presentation presentation = new Presentation(info.getText());
       presentation.setIcon(info.getIcon());
-      mySession = getDockManager().createDragSession(mouseEvent, createDockableEditor(myProject, img, myFile, presentation, myWindow));
+      EditorWithProviderComposite windowFileComposite = myWindow.findFileComposite(myFile);
+      FileEditor[] editors = windowFileComposite != null ? windowFileComposite.getEditors() : FileEditor.EMPTY_ARRAY;
+      boolean isNorthPanelAvailable = DockManagerImpl.isNorthPanelAvailable(editors);
+      mySession = getDockManager()
+        .createDragSession(mouseEvent, createDockableEditor(myProject, img, myFile, presentation, myWindow, isNorthPanelAvailable));
     }
 
     private DockManager getDockManager() {
@@ -517,15 +535,32 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     private final Presentation myPresentation;
     private final Dimension myPreferredSize;
     private final boolean myPinned;
+    private final boolean myNorthPanelAvailable;
     private final VirtualFile myFile;
 
-    public DockableEditor(Project project, Image img, VirtualFile file, Presentation presentation, Dimension preferredSize, boolean isFilePinned) {
+    public DockableEditor(Project project,
+                          Image img,
+                          VirtualFile file,
+                          Presentation presentation,
+                          Dimension preferredSize,
+                          boolean isFilePinned) {
+      this(project, img, file, presentation, preferredSize, isFilePinned, DockManagerImpl.isNorthPanelVisible(UISettings.getInstance()));
+    }
+
+    public DockableEditor(Project project,
+                          Image img,
+                          VirtualFile file,
+                          Presentation presentation,
+                          Dimension preferredSize,
+                          boolean isFilePinned,
+                          boolean isNorthPanelAvailable) {
       myImg = img;
       myFile = file;
       myPresentation = presentation;
       myContainer = new DockableEditorTabbedContainer(project);
       myPreferredSize = preferredSize;
       myPinned = isFilePinned;
+      myNorthPanelAvailable = isNorthPanelAvailable;
     }
 
     @NotNull
@@ -566,6 +601,10 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     public boolean isPinned() {
       return myPinned;
     }
+
+    public boolean isNorthPanelAvailable() {
+      return myNorthPanelAvailable;
+    }
   }
 
   private final class MyTransferHandler extends TransferHandler {
@@ -594,8 +633,8 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
       super(project, parentDisposable);
 
       myWindow = window;
-      IdeEventQueue.getInstance().addDispatcher(createFocusDispatcher(), parentDisposable);
-      setUiDecorator(() -> new UiDecorator.UiDecoration(null, JBUI.insets(0, 8, 0, 8)));
+      UIUtil.addAwtListener(e -> updateActive(), AWTEvent.FOCUS_EVENT_MASK, parentDisposable);
+      setUiDecorator(() -> new UiDecorator.UiDecoration(null, JBUI.CurrentTheme.EditorTabs.tabInsets()));
 
       project.getMessageBus().connect(parentDisposable).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
         @Override
@@ -655,15 +694,6 @@ public final class EditorTabbedContainer implements CloseAction.CloseTarget {
     public ActionCallback select(@NotNull TabInfo info, boolean requestFocus) {
       active = true;
       return super.select(info, requestFocus);
-    }
-
-    private IdeEventQueue.EventDispatcher createFocusDispatcher() {
-      return e -> {
-        if (e instanceof FocusEvent) {
-          updateActive();
-        }
-        return false;
-      };
     }
 
     private void updateActive() {

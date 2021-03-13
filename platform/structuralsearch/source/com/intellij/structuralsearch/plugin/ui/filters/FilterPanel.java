@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
 import com.intellij.ide.DataManager;
@@ -49,7 +49,6 @@ public class FilterPanel implements FilterTable {
   @NotNull final Project myProject;
   private CompiledPattern myCompiledPattern;
   NamedScriptableDefinition myConstraint;
-  boolean myShown = false;
   LanguageFileType myFileType;
 
   final Header myHeader = new Header();
@@ -173,11 +172,9 @@ public class FilterPanel implements FilterTable {
   }
 
   @Override
-  @NotNull
+  @Nullable
   public StructuralSearchProfile getProfile() {
-    final StructuralSearchProfile fileType = StructuralSearchUtil.getProfileByFileType(myFileType);
-    assert fileType != null;
-    return fileType;
+    return StructuralSearchUtil.getProfileByFileType(myFileType);
   }
 
   @Override
@@ -206,15 +203,12 @@ public class FilterPanel implements FilterTable {
     return myFilterPanel;
   }
 
-  public void setFileType(@NotNull LanguageFileType fileType) {
+  public void setFileType(@Nullable LanguageFileType fileType) {
     myFileType = fileType;
   }
 
   public void setCompiledPattern(@Nullable CompiledPattern compiledPattern) {
     myCompiledPattern = compiledPattern;
-    if (myCompiledPattern == null) {
-      myShown = false;
-    }
     showFilters();
   }
 
@@ -227,7 +221,6 @@ public class FilterPanel implements FilterTable {
       return;
     }
     myConstraint = constraint;
-    myShown = false;
     showFilters();
   }
 
@@ -236,7 +229,7 @@ public class FilterPanel implements FilterTable {
   }
 
   private void showFilters() {
-    if (myConstraint == null || myShown) {
+    if (myConstraint == null) {
       return;
     }
     if (!isValid()) {
@@ -271,12 +264,9 @@ public class FilterPanel implements FilterTable {
                                      ? SSRBundle.message("add.filter.label")
                                      : SSRBundle.message("add.script.label"),
                                      SimpleTextAttributes.LINK_ATTRIBUTES,
-                                     e -> {
-                                       final JBTable table = myFilterTable.getTable();
-                                       showAddFilterPopup(table, new RelativePoint(table, table.getMousePosition()));
-                                     });
+                                     e -> showAddFilterPopup(myFilterTable.getTable(),
+                                                             new RelativePoint(MouseInfo.getPointerInfo().getLocation())));
     }
-    myShown = true;
   }
 
   public void setConstraintChangedCallback(Runnable callback) {

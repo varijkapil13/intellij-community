@@ -5,6 +5,7 @@ import com.intellij.application.options.ModuleDescriptionsComboBox;
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.configurations.RemoteConnection;
 import com.intellij.execution.ui.ConfigurationModuleSelector;
+import com.intellij.openapi.compiler.JavaCompilerBundle;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
@@ -25,7 +26,6 @@ import com.intellij.ui.components.DropDownLink;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UI;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -38,17 +38,13 @@ import java.util.Arrays;
 
 public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
   private enum Mode {
-    ATTACH("Attach to remote JVM"),
-    LISTEN("Listen to remote JVM");
-
-    private final String text;
-    Mode(String text) {
-      this.text = text;
-    }
+    ATTACH, LISTEN;
 
     @Override
     public String toString() {
-      return text;
+      return this == ATTACH
+             ? ExecutionBundle.message("combo.attach.to.remote")
+             : ExecutionBundle.message("combo.listen.to.remote");
     }
   }
 
@@ -80,7 +76,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
 
       @Override
       public String toString() {
-        return "JDK 9 or later";
+        return ExecutionBundle.message("combo.java.version.9+");
       }
     },
     JDK5to8(JavaSdkVersion.JDK_1_5)  {
@@ -91,7 +87,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
 
       @Override
       public String toString() {
-        return "JDK 5 - 8";
+        return ExecutionBundle.message("combo.java.version.5.to.8");
       }
     },
     JDK1_4(JavaSdkVersion.JDK_1_4) {
@@ -102,7 +98,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
 
       @Override
       public String toString() {
-        return "JDK 1.4.x";
+        return ExecutionBundle.message("combo.java.version.1.4");
       }
     },
     JDK1_3(JavaSdkVersion.JDK_1_3) {
@@ -113,7 +109,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
 
       @Override
       public String toString() {
-        return "JDK 1.3.x or earlier";
+        return ExecutionBundle.message("combo.java.version.1.3");
       }
     };
 
@@ -197,7 +193,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
 
     updateArgsText(vi);
 
-    DropDownLink<JDKVersionItem> ddl = new DropDownLink<>(vi, Arrays.asList(JDKVersionItem.values()), i -> updateArgsText(i));
+    DropDownLink<JDKVersionItem> ddl = new DropDownLink<>(vi, Arrays.asList(JDKVersionItem.values()), i -> updateArgsText(i), true);
     ddl.setToolTipText(ExecutionBundle.message("jvm.arguments.format"));
 
     gc.gridx = 0;
@@ -212,7 +208,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
                                withComment(ExecutionBundle.message("copy.and.paste.the.arguments.to.the.command.line.when.jvm.is.started")).createPanel(), gc);
 
     ModuleDescriptionsComboBox myModuleCombo = new ModuleDescriptionsComboBox();
-    myModuleCombo.allowEmptySelection("<whole project>");
+    myModuleCombo.allowEmptySelection(JavaCompilerBundle.message("whole.project"));
     myModuleSelector = new ConfigurationModuleSelector(project, myModuleCombo);
 
     gc.gridx = 0;
@@ -322,10 +318,10 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
   private JPanel createModePanel(GridBagConstraints gc) {
     JPanel panel = new JPanel(new GridBagLayout());
 
-    JLabel modeLabel = createLabelFor("&Debugger mode:", myModeCombo);
-    JLabel transportLabel = createLabelFor("&Transport:", myTransportCombo);
-    JLabel hostLabel = createLabelFor("&Host:", myHostName);
-    JLabel portLabel = createLabelFor("&Port:", myPort);
+    JLabel modeLabel = createLabelFor(JavaCompilerBundle.message("label.debugger.mode"), myModeCombo);
+    JLabel transportLabel = createLabelFor(JavaCompilerBundle.message("label.transport"), myTransportCombo);
+    JLabel hostLabel = createLabelFor(JavaCompilerBundle.message("label.host"), myHostName);
+    JLabel portLabel = createLabelFor(JavaCompilerBundle.message("label.port"), myPort);
 
     gc.gridwidth = 2;
     panel.add(modeLabel, gc);
@@ -349,7 +345,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
     panel.add(new JPanel(), gc);
 
     if (SystemInfo.isWindows) {
-      JLabel addressLabel = createLabelFor("&Address:", myAddress);
+      JLabel addressLabel = createLabelFor(JavaCompilerBundle.message("label.address"), myAddress);
 
       addressLabel.setVisible(false);
       myAddress.setVisible(false);

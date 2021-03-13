@@ -16,6 +16,7 @@ import com.intellij.openapi.ui.DialogWrapper.IdeModalityType.PROJECT
 import com.intellij.openapi.ui.Messages.*
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.ui.ColoredTableCellRenderer
+import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.table.JBTable
@@ -30,6 +31,7 @@ import git4idea.repo.GitRepository
 import org.jetbrains.annotations.Nls
 import java.awt.Component
 import java.awt.Font
+import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
@@ -66,6 +68,16 @@ class GitConfigureRemotesDialog(val project: Project, val repositories: Collecti
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
     table.intercellSpacing = JBUI.emptySize()
     table.setDefaultRenderer(Any::class.java, MyCellRenderer())
+
+    object : DoubleClickListener() {
+      override fun onDoubleClick(e: MouseEvent): Boolean {
+        if (isRemoteSelected()) {
+          editRemote()
+          return true
+        }
+        return false
+      }
+    }.installOn(table)
 
     return ToolbarDecorator.createDecorator(table).
         setAddAction { addRemote() }.
@@ -173,6 +185,7 @@ class GitConfigureRemotesDialog(val project: Project, val repositories: Collecti
   private fun isRemoteSelected() = getSelectedRemote() != null
 
   private abstract class Node {
+    @Nls
     abstract fun getPresentableString() : String
   }
   private class RepoNode(val repository: GitRepository) : Node() {

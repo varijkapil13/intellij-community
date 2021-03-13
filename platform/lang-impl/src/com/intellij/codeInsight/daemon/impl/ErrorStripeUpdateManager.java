@@ -11,6 +11,7 @@ import com.intellij.openapi.editor.ex.EditorMarkupModel;
 import com.intellij.openapi.editor.ex.ErrorStripTooltipRendererProvider;
 import com.intellij.openapi.editor.impl.EditorMarkupModelImpl;
 import com.intellij.openapi.editor.markup.ErrorStripeRenderer;
+import com.intellij.openapi.editor.markup.UIController;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.TextEditor;
@@ -61,7 +62,7 @@ public final class ErrorStripeUpdateManager implements Disposable {
   @SuppressWarnings("WeakerAccess") // Used in Rider
   protected void setOrRefreshErrorStripeRenderer(@NotNull EditorMarkupModel editorMarkupModel, @Nullable PsiFile file) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    if (!editorMarkupModel.isErrorStripeVisible() || !DaemonCodeAnalyzer.getInstance(myProject).isHighlightingAvailable(file)) {
+    if (!editorMarkupModel.isErrorStripeVisible() || file == null || !DaemonCodeAnalyzer.getInstance(myProject).isHighlightingAvailable(file)) {
       return;
     }
     ErrorStripeRenderer renderer = editorMarkupModel.getErrorStripeRenderer();
@@ -83,14 +84,19 @@ public final class ErrorStripeUpdateManager implements Disposable {
     return new DaemonTooltipRendererProvider(myProject, editor);
   }
 
-  @Nullable
-  protected TrafficLightRenderer createRenderer(@NotNull Editor editor, @Nullable PsiFile file) {
+  private TrafficLightRenderer createRenderer(@NotNull Editor editor, @Nullable PsiFile file) {
     for (TrafficLightRendererContributor contributor : TrafficLightRendererContributor.EP_NAME.getExtensionList()) {
       TrafficLightRenderer renderer = contributor.createRenderer(editor, file);
       if (renderer != null) {
         return renderer;
       }
     }
-    return new TrafficLightRenderer(myProject, editor.getDocument());
+    return new TrafficLightRenderer(myProject, editor.getDocument()) {
+      @Override
+      @NotNull
+      protected UIController createUIController() {
+        return super.createUIController(editor);
+      }
+    };
   }
 }

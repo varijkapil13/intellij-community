@@ -5,7 +5,10 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.intellij.ide.plugins.PluginNode
 import com.intellij.ide.plugins.RepositoryHelper
+import com.intellij.ide.plugins.advertiser.PluginData
 import com.intellij.ide.plugins.newui.Tags
+import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.util.text.StringUtil.unquoteString
 
 /**
  * Object from Search Service for getting compatible updates for IDE.
@@ -34,6 +37,7 @@ data class IntellijUpdateMetadata(
   val description: String = "",
   val tags: List<String> = emptyList(),
   val vendor: String = "",
+  val organization: String = "",
   val version: String = "",
   val notes: String = "",
   val dependencies: Set<String> = emptySet(),
@@ -45,9 +49,7 @@ data class IntellijUpdateMetadata(
   val size: Int = 0
 ) {
   fun toPluginNode(): PluginNode {
-    val pluginNode = PluginNode()
-    pluginNode.setId(id)
-    pluginNode.name = name
+    val pluginNode = PluginNode(PluginId.getId(id), name, size.toString())
     pluginNode.description = description
     pluginNode.vendor = vendor
     pluginNode.tags = tags
@@ -56,8 +58,8 @@ data class IntellijUpdateMetadata(
     pluginNode.untilBuild = until
     pluginNode.productCode = productCode
     pluginNode.version = version
+    pluginNode.organization = organization
     pluginNode.url = url
-    pluginNode.size = size.toString()
     for (dep in dependencies) {
       pluginNode.addDepends(dep, false)
     }
@@ -87,8 +89,7 @@ internal class MarketplaceSearchPluginData(
   val downloads: String = ""
 ) {
   fun toPluginNode(): PluginNode {
-    val pluginNode = PluginNode()
-    pluginNode.setId(id)
+    val pluginNode = PluginNode(PluginId.getId(id))
     pluginNode.name = name
     pluginNode.rating = String.format("%.2f", rating)
     pluginNode.downloads = downloads
@@ -115,8 +116,27 @@ data class FeatureImpl(
   val description: String? = null,
   val version: String? = null,
   val implementationName: String? = null,
-  val bundled: Boolean = false
-)
+  val bundled: Boolean = false,
+) {
+
+  fun toPluginData(isFromCustomRepository: Boolean = false): PluginData? {
+    return pluginId
+      ?.let { unquoteString(it) }
+      ?.let { id ->
+        PluginData(
+          id,
+          pluginName?.let { unquoteString(it) },
+          bundled,
+          isFromCustomRepository,
+        )
+      }
+  }
+
+  fun toPluginData(isFromCustomRepository: (String) -> Boolean): PluginData? {
+    return pluginId
+      ?.let { toPluginData(isFromCustomRepository.invoke(it)) }
+  }
+}
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 class MarketplaceBrokenPlugin(

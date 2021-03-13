@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.refactoring.introduceParameter;
 
@@ -8,7 +8,6 @@ import com.intellij.codeInsight.FunctionalInterfaceSuggester;
 import com.intellij.codeInsight.completion.JavaCompletionUtil;
 import com.intellij.codeInsight.navigation.NavigationUtil;
 import com.intellij.ide.util.PsiClassListCellRenderer;
-import com.intellij.java.JavaBundle;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
@@ -20,7 +19,6 @@ import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.colors.EditorColors;
-import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.markup.HighlighterLayer;
 import com.intellij.openapi.editor.markup.HighlighterTargetArea;
 import com.intellij.openapi.editor.markup.MarkupModel;
@@ -63,7 +61,8 @@ import com.intellij.usageView.UsageInfo;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.PairConsumer;
-import gnu.trove.TIntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -85,32 +84,34 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file, DataContext dataContext) {
     PsiDocumentManager.getInstance(project).commitAllDocuments();
     editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
-    ElementToWorkOn.processElementToWorkOn(editor, file, getRefactoringName(), HelpID.INTRODUCE_PARAMETER, project, new ElementToWorkOn.ElementsProcessor<ElementToWorkOn>() {
-      @Override
-      public boolean accept(ElementToWorkOn el) {
-        return true;
-      }
+    ElementToWorkOn.processElementToWorkOn(editor, file, getRefactoringName(), HelpID.INTRODUCE_PARAMETER, project,
+                                           new ElementToWorkOn.ElementsProcessor<>() {
+                                             @Override
+                                             public boolean accept(ElementToWorkOn el) {
+                                               return true;
+                                             }
 
-      @Override
-      public void pass(final ElementToWorkOn elementToWorkOn) {
-        if (elementToWorkOn == null) {
-          return;
-        }
+                                             @Override
+                                             public void pass(final ElementToWorkOn elementToWorkOn) {
+                                               if (elementToWorkOn == null) {
+                                                 return;
+                                               }
 
-        if (elementToWorkOn.getLocalVariable() == null && elementToWorkOn.getExpression() == null) {
-          if (!introduceStrategy(project, editor, file)) {
-            ElementToWorkOn.showNothingSelectedErrorMessage(editor, getRefactoringName(), HelpID.INTRODUCE_PARAMETER, project);
-          }
-          return;
-        }
+                                               if (elementToWorkOn.getLocalVariable() == null && elementToWorkOn.getExpression() == null) {
+                                                 if (!introduceStrategy(project, editor, file)) {
+                                                   ElementToWorkOn.showNothingSelectedErrorMessage(editor, getRefactoringName(),
+                                                                                                   HelpID.INTRODUCE_PARAMETER, project);
+                                                 }
+                                                 return;
+                                               }
 
-        final PsiExpression expr = elementToWorkOn.getExpression();
-        final PsiLocalVariable localVar = elementToWorkOn.getLocalVariable();
-        final boolean isInvokedOnDeclaration = elementToWorkOn.isInvokedOnDeclaration();
+                                               final PsiExpression expr = elementToWorkOn.getExpression();
+                                               final PsiLocalVariable localVar = elementToWorkOn.getLocalVariable();
+                                               final boolean isInvokedOnDeclaration = elementToWorkOn.isInvokedOnDeclaration();
 
-        invoke(editor, project, expr, localVar, isInvokedOnDeclaration);
-      }
-    });
+                                               invoke(editor, project, expr, localVar, isInvokedOnDeclaration);
+                                             }
+                                           });
   }
 
   @Override
@@ -221,9 +222,9 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
       final PsiMethod selectedMethod = list.getSelectedValue();
       if (selectedMethod == null) return;
       dropHighlighters(highlighters);
-      updateView(selectedMethod, editor, EditorColors.SEARCH_RESULT_ATTRIBUTES, highlighters, superMethod);
+      updateView(selectedMethod, editor, highlighters, superMethod);
     });
-    updateView(validEnclosingMethods.get(0), editor, EditorColors.SEARCH_RESULT_ATTRIBUTES, highlighters, superMethod);
+    updateView(validEnclosingMethods.get(0), editor, highlighters, superMethod);
     final JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(list);
     scrollPane.setBorder(null);
     panel.add(scrollPane, BorderLayout.CENTER);
@@ -255,7 +256,6 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
 
   private static void updateView(PsiMethod selectedMethod,
                                  Editor editor,
-                                 @NotNull TextAttributesKey attributesKey,
                                  List<? super RangeHighlighter> highlighters,
                                  JCheckBox superMethod) {
     final MarkupModel markupModel = editor.getMarkupModel();
@@ -263,7 +263,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
     if (nameIdentifier != null) {
       final TextRange textRange = nameIdentifier.getTextRange();
       final RangeHighlighter rangeHighlighter = markupModel.addRangeHighlighter(
-        attributesKey, textRange.getStartOffset(), textRange.getEndOffset(), HighlighterLayer.SELECTION - 1,
+        EditorColors.SEARCH_RESULT_ATTRIBUTES, textRange.getStartOffset(), textRange.getEndOffset(), HighlighterLayer.SELECTION - 1,
         HighlighterTargetArea.EXACT_RANGE);
       highlighters.add(rangeHighlighter);
     }
@@ -432,14 +432,13 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
       }
       if (ApplicationManager.getApplication().isUnitTestMode()) {
         @NonNls String parameterName = "anObject";
-        boolean replaceAllOccurences = true;
-        boolean isDeleteLocalVariable = true;
         PsiExpression initializer = myLocalVar != null && myExpr == null ? myLocalVar.getInitializer() : myExpr;
-        new IntroduceParameterProcessor(myProject, method, methodToSearchFor, initializer, myExpr, myLocalVar, isDeleteLocalVariable, parameterName,
-                                        replaceAllOccurences, IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE, mustBeFinal,
+        new IntroduceParameterProcessor(myProject, method, methodToSearchFor, initializer, myExpr, myLocalVar, true, parameterName,
+                                        true, IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE, mustBeFinal,
                                         false, null,
                                         getParamsToRemove(method, occurrences)).run();
-      } else {
+      }
+      else {
         if (myEditor != null) {
           RefactoringUtil.highlightAllOccurrences(myProject, occurrences, myEditor);
         }
@@ -483,12 +482,12 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
                             : new TypeSelectorManagerImpl(myProject, initializerType, occurrences);
     }
 
-    private TIntArrayList getParamsToRemove(PsiMethod method, PsiExpression[] occurrences) {
+    private IntList getParamsToRemove(PsiMethod method, PsiExpression[] occurrences) {
       PsiExpression expressionToRemoveParamFrom = myExpr;
       if (myExpr == null) {
         expressionToRemoveParamFrom = myLocalVar.getInitializer();
       }
-      return expressionToRemoveParamFrom == null ? new TIntArrayList() : Util
+      return expressionToRemoveParamFrom == null ? new IntArrayList() : Util
         .findParametersToRemove(method, expressionToRemoveParamFrom, occurrences);
     }
   }
@@ -558,10 +557,11 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
           final String title = RefactoringBundle.message("refactoring.introduce.parameter.interface.chooser.popup.title",
                                                              methodSignature, returnType.getPresentableText());
           NavigationUtil.getPsiElementPopup(psiClasses, new PsiClassListCellRenderer(), title,
-                                            new PsiElementProcessor<PsiClass>() {
+                                            new PsiElementProcessor<>() {
                                               @Override
                                               public boolean execute(@NotNull PsiClass psiClass) {
-                                                functionalInterfaceSelected(classes.get(psiClass), enclosingMethods, project, editor, processor,
+                                                functionalInterfaceSelected(classes.get(psiClass), enclosingMethods, project, editor,
+                                                                            processor,
                                                                             elements);
                                                 return true;
                                               }

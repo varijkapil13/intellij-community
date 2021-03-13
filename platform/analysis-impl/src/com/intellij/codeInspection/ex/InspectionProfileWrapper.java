@@ -10,9 +10,9 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.psi.PsiElement;
-import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
@@ -39,7 +39,7 @@ public class InspectionProfileWrapper {
     myProfileManager = profile.getProfileManager();
   }
 
-  public InspectionProfileWrapper(@NotNull InspectionProfile profile, 
+  public InspectionProfileWrapper(@NotNull InspectionProfile profile,
                                   @NotNull InspectionProfileManager profileManager) {
     myProfile = profile;
     myProfileManager = profileManager;
@@ -49,13 +49,13 @@ public class InspectionProfileWrapper {
     return myProfileManager;
   }
 
-  public static void checkInspectionsDuplicates(@NotNull List<InspectionToolWrapper<?, ?>> toolWrappers) {
+  public static void checkInspectionsDuplicates(@NotNull List<? extends InspectionToolWrapper<?, ?>> toolWrappers) {
     if (alreadyChecked) {
       return;
     }
 
     alreadyChecked = true;
-    Set<InspectionProfileEntry> uniqueTools = new THashSet<>(toolWrappers.size());
+    Set<InspectionProfileEntry> uniqueTools = new HashSet<>(toolWrappers.size());
     for (InspectionToolWrapper<?, ?> toolWrapper : toolWrappers) {
       ProgressManager.checkCanceled();
       if (!uniqueTools.add(toolWrapper.getTool())) {

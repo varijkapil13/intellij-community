@@ -14,6 +14,7 @@ import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.pom.Navigatable
 import com.intellij.psi.PsiElement
@@ -47,6 +48,13 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
     return withInlayAttributes(textWithoutBox)
   }
 
+  fun smallTextWithoutBackground(text: String): InlayPresentation {
+    val textWithoutBox = InsetPresentation(TextInlayPresentation(textMetricsStorage, true, text), top = 1, down = 1)
+    return AttributesTransformerPresentation(textWithoutBox) {
+      it.withDefault(attributesOf(DefaultLanguageHighlighterColors.INLAY_TEXT_WITHOUT_BACKGROUND))
+    }
+  }
+
   override fun container(
     presentation: InlayPresentation,
     padding: Padding?,
@@ -69,17 +77,14 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
 
   @Contract(pure = true)
   @Deprecated(message = "Bad API for Java, use mouseHandling with ClickListener")
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   fun mouseHandling(
     base: InlayPresentation,
     clickListener: ((MouseEvent, Point) -> Unit)?,
     hoverListener: HoverListener?
   ): InlayPresentation {
     val adapter = if (clickListener != null) {
-      object : ClickListener {
-        override fun onClick(event: MouseEvent, translated: Point) {
-          clickListener.invoke(event, translated)
-        }
-      }
+      ClickListener { event, translated -> clickListener.invoke(event, translated) }
     }
     else {
       null
@@ -113,7 +118,30 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
   }
 
   @Contract(pure = true)
+  fun roundWithBackgroundAndSmallInset(base: InlayPresentation): InlayPresentation {
+    val rounding = withInlayAttributes(RoundWithBackgroundPresentation(
+      InsetPresentation(
+        base,
+        left = 3,
+        right = 3,
+        top = 0,
+        down = 0
+      ),
+      8,
+      8
+    ))
+    return DynamicInsetPresentation(rounding, offsetFromTopProvider)
+  }
+
+  @Contract(pure = true)
   override fun icon(icon: Icon): IconPresentation = IconPresentation(icon, editor.component)
+
+  @Contract(pure = true)
+  override fun smallScaledIcon(icon: Icon): InlayPresentation
+  {
+    val iconWithoutBox = InsetPresentation(ScaledIconPresentation(textMetricsStorage, true, icon, editor.component), top = 1, down = 1)
+    return withInlayAttributes(iconWithoutBox)
+  }
 
   @Contract(pure = true)
   fun folding(placeholder: InlayPresentation, unwrapAction: () -> InlayPresentation): InlayPresentation {
@@ -357,14 +385,14 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
 
   private fun withInlayAttributes(base: InlayPresentation): InlayPresentation {
     return AttributesTransformerPresentation(base) {
-      it.withDefault(attributesOf(DefaultLanguageHighlighterColors.INLINE_PARAMETER_HINT))
+      it.withDefault(attributesOf(DefaultLanguageHighlighterColors.INLAY_DEFAULT))
     }
   }
 
   private fun isControlDown(e: MouseEvent): Boolean = (SystemInfo.isMac && e.isMetaDown) || e.isControlDown
 
   @Contract(pure = true)
-  fun withTooltip(tooltip: String, base: InlayPresentation): InlayPresentation = when {
+  fun withTooltip(@NlsContexts.HintText tooltip: String, base: InlayPresentation): InlayPresentation = when {
     tooltip.isEmpty() -> base
     else -> {
       var hint: LightweightHint? = null
@@ -382,7 +410,7 @@ class PresentationFactory(private val editor: EditorImpl) : InlayPresentationFac
       })
     }
   }
-  private fun showTooltip(editor: Editor, e: MouseEvent, text: String): LightweightHint {
+  private fun showTooltip(editor: Editor, e: MouseEvent, @NlsContexts.HintText text: String): LightweightHint {
     val hint = run {
       val label = HintUtil.createInformationLabel(text)
       label.border = JBUI.Borders.empty(6, 6, 5, 6)

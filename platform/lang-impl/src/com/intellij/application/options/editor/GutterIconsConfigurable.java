@@ -170,13 +170,13 @@ public class GutterIconsConfigurable implements SearchableConfigurable, Configur
     }
   }
 
-  private static String getPluginDisplayName(PluginDescriptor pluginDescriptor) {
+  private static @Nls String getPluginDisplayName(PluginDescriptor pluginDescriptor) {
     if (pluginDescriptor instanceof IdeaPluginDescriptor && pluginDescriptor.getPluginId() == PluginManagerCore.CORE_ID) return IdeBundle.message("title.common");
     return pluginDescriptor.getName();
   }
 
   private void createUIComponents() {
-    myList = new CheckBoxList<GutterIconDescriptor>() {
+    myList = new CheckBoxList<>() {
       @Override
       protected JComponent adjustRendering(JComponent rootComponent, JCheckBox checkBox, int index, boolean selected, boolean hasFocus) {
         JPanel panel = new JPanel(new BorderLayout());

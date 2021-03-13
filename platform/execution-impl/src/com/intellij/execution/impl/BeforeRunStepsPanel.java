@@ -8,16 +8,14 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.UnknownRunConfiguration;
 import com.intellij.execution.impl.RunConfigurationBeforeRunProvider.RunConfigurableBeforeRunTask;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonShortcuts;
-import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.scale.JBUIScale;
@@ -274,8 +272,12 @@ public final class BeforeRunStepsPanel extends JPanel {
         }
       });
     }
-    ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(ExecutionBundle.message("add.new.run.configuration.action2.name"), actionGroup,
-                                                                          SimpleDataContext.getProjectContext(myRunConfiguration.getProject()), false, false, false, null,
+    DataContext dataContext = SimpleDataContext.builder()
+      .add(CommonDataKeys.PROJECT, myRunConfiguration.getProject())
+      .add(PlatformDataKeys.CONTEXT_COMPONENT, myPanel)
+      .build();
+    ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(ExecutionBundle.message("add.new.before.run.task.name"), actionGroup,
+                                                                          dataContext, false, false, false, null,
                                                                           -1, Conditions.alwaysTrue());
     popup.show(Objects.requireNonNull(button.getPreferredPopupPoint()));
   }
@@ -313,7 +315,7 @@ public final class BeforeRunStepsPanel extends JPanel {
   public interface StepsBeforeRunListener {
     void fireStepsBeforeRunChanged();
 
-    void titleChanged(@NotNull String title);
+    void titleChanged(@NotNull @NlsContexts.Separator String title);
   }
 
   private final class MyListCellRenderer extends JBList.StripedListCellRenderer {

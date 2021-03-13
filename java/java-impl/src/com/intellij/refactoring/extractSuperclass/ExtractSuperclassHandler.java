@@ -24,7 +24,6 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.progress.ProgressManager;
@@ -98,7 +97,13 @@ public class ExtractSuperclassHandler implements ElementsHandler, ExtractSupercl
       return;
     }
 
-    List<MemberInfo> memberInfos = MemberInfo.extractClassMembers(mySubclass, new MemberInfo.Filter<PsiMember>() {
+    if (mySubclass.isRecord()) {
+      String message = RefactoringBundle.getCannotRefactorMessage(JavaRefactoringBundle.message("superclass.cannot.be.extracted.from.a.record"));
+      CommonRefactoringUtil.showErrorHint(project, editor, message, getRefactoringName(), HelpID.EXTRACT_SUPERCLASS);
+      return;
+    }
+
+    List<MemberInfo> memberInfos = MemberInfo.extractClassMembers(mySubclass, new MemberInfo.Filter<>() {
       @Override
       public boolean includeMember(PsiMember element) {
         return true;
@@ -155,6 +160,7 @@ public class ExtractSuperclassHandler implements ElementsHandler, ExtractSupercl
     }
   }
 
+  @NlsContexts.Label
   private static String getCommandName(final PsiClass subclass, String newName) {
     return RefactoringBundle.message("extract.superclass.command.name", newName, DescriptiveNameUtil.getDescriptiveName(subclass));
   }

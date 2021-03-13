@@ -62,7 +62,9 @@ public class InvokeCompletion extends ActionOnFile {
 
   @Override
   public void performCommand(@NotNull Environment env) {
-    int offset = generateDocOffset(env, "Invoke basic completion at offset %s");
+    int offset = generateDocOffset(env, null);
+    env.logMessage("Invoke basic completion at " + MadTestingUtil.getPositionDescription(offset, getDocument()));
+
     String selectionCharacters = myPolicy.getPossibleSelectionCharacters();
     char c = selectionCharacters.charAt(env.generateValue(Generator.integers(0, selectionCharacters.length() - 1), null));
     performActionAt(offset, c, env);
@@ -128,7 +130,7 @@ public class InvokeCompletion extends ActionOnFile {
         return;
       }
       env.logMessage("No lookup");
-      if (expectedVariant == null || prefixEqualsExpected || !checkAnnotatorErrorsAtCaret(editor, env, expectedVariant)) {
+      if (expectedVariant == null || prefixEqualsExpected || !checkHighlightingErrorsAtCaret(editor, env, expectedVariant)) {
         return;
       }
 
@@ -140,7 +142,7 @@ public class InvokeCompletion extends ActionOnFile {
       LookupElement sameItem = ContainerUtil.find(items, e ->
         e.getAllLookupStrings().stream().anyMatch(
           s -> Comparing.equal(s, expectedVariant, e.isCaseSensitive())));
-      if (sameItem == null && !checkAnnotatorErrorsAtCaret(editor, env, expectedVariant)) {
+      if (sameItem == null && !checkHighlightingErrorsAtCaret(editor, env, expectedVariant)) {
         return;
       }
       TestCase.assertNotNull("No variant '" + expectedVariant + "' among " + items + notFound, sameItem);
@@ -162,7 +164,7 @@ public class InvokeCompletion extends ActionOnFile {
     }
   }
 
-  private boolean checkAnnotatorErrorsAtCaret(Editor editor, Environment env, String expectedVariant) {
+  private boolean checkHighlightingErrorsAtCaret(Editor editor, Environment env, String expectedVariant) {
     Editor hostEditor = InjectedLanguageEditorUtil.getTopLevelEditor(editor);
     List<HighlightInfo> infos = InvokeIntention.highlightErrors(getProject(), hostEditor);
     int caretOffset = hostEditor.getCaretModel().getOffset();
@@ -183,8 +185,8 @@ public class InvokeCompletion extends ActionOnFile {
     return expectedEnd == caretOffset && getFile().getText().substring(0, caretOffset).endsWith(expectedVariant);
   }
 
-  private static void checkNoDuplicates(List<LookupElement> items) {
-    Set<List<?>> presentations = new HashSet<>();
+  private void checkNoDuplicates(List<LookupElement> items) {
+    Map<List<?>, LookupElement> presentations = new HashMap<>();
     for (LookupElement item : items) {
       LookupElementPresentation p = TestLookupElementPresentation.renderReal(item);
       if (seemsTruncated(p.getItemText()) || seemsTruncated(p.getTailText()) || seemsTruncated(p.getTypeText())) {
@@ -196,7 +198,8 @@ public class InvokeCompletion extends ActionOnFile {
                                         p.getTailFragments(),
                                         p.getTypeText(), TestLookupElementPresentation.unwrapIcon(p.getTypeIcon()), p.isTypeGrayed(),
                                         p.isStrikeout());
-      if (!presentations.add(info)) {
+      var prev = presentations.put(info, item);
+      if (prev != null && !myPolicy.areDuplicatesOk(prev, item)) {
         TestCase.fail("Duplicate suggestions: " + p);
       }
     }

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.util;
 
 import com.intellij.codeInsight.ExpectedTypeInfo;
@@ -40,8 +40,8 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.text.UniqueNameGenerator;
-import gnu.trove.THashMap;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,14 +66,6 @@ public final class RefactoringUtil {
 
   public static boolean isInStaticContext(PsiElement element, @Nullable final PsiClass aClass) {
     return PsiUtil.getEnclosingStaticElement(element, aClass) != null;
-  }
-
-  /**
-   * @deprecated use {@link PsiTypesUtil#hasUnresolvedComponents(PsiType)}
-   */
-  @Deprecated
-  public static boolean isResolvableType(PsiType type) {
-    return !PsiTypesUtil.hasUnresolvedComponents(type);
   }
 
   public static PsiElement replaceOccurenceWithFieldRef(PsiExpression occurrence, PsiField newField, PsiClass destinationClass)
@@ -314,7 +306,7 @@ public final class RefactoringUtil {
   public static boolean canBeDeclaredFinal(@NotNull PsiVariable variable) {
     LOG.assertTrue(variable instanceof PsiLocalVariable || variable instanceof PsiParameter);
     final boolean isReassigned = HighlightControlFlowUtil
-      .isReassigned(variable, new THashMap<>());
+      .isReassigned(variable, new HashMap<>());
     return !isReassigned;
   }
 
@@ -975,7 +967,7 @@ public final class RefactoringUtil {
     final PsiElement body = lambdaExpression.getBody();
     if (!(body instanceof PsiExpression)) return (PsiCodeBlock)body;
 
-    String newLambdaText = "{";
+    @NonNls String newLambdaText = "{";
     if (!PsiType.VOID.equals(LambdaUtil.getFunctionalInterfaceReturnType(lambdaExpression))) newLambdaText += "return ";
     newLambdaText += "a;}";
 
@@ -997,6 +989,7 @@ public final class RefactoringUtil {
     return (PsiCodeBlock)CodeStyleManager.getInstance(project).reformat(body.replace(codeBlock));
   }
 
+  @NlsContexts.DialogMessage
   public static String checkEnumConstantInSwitchLabel(PsiExpression expr) {
     if (PsiImplUtil.getSwitchLabel(expr) != null) {
       PsiReferenceExpression ref = ObjectUtils.tryCast(PsiUtil.skipParenthesizedExprDown(expr), PsiReferenceExpression.class);

@@ -1,9 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.ProjectTopics;
 import com.intellij.codeHighlighting.Pass;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
+import com.intellij.codeInsight.daemon.LineMarkerInfo;
 import com.intellij.codeInsight.daemon.LineMarkerProviders;
 import com.intellij.codeInsight.daemon.impl.analysis.FileHighlightingSettingListener;
 import com.intellij.codeInsight.intention.IntentionAction;
@@ -58,7 +59,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.roots.ModuleRootListener;
-import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.UserDataHolderEx;
@@ -101,8 +102,8 @@ public final class DaemonListeners implements Disposable {
 
   private static final Key<Boolean> DAEMON_INITIALIZED = Key.create("DAEMON_INITIALIZED");
 
-  public static DaemonListeners getInstance(Project project) {
-    return project.getComponent(DaemonListeners.class);
+  public static DaemonListeners getInstance(@NotNull Project project) {
+    return project.getService(DaemonListeners.class);
   }
 
   public DaemonListeners(@NotNull Project project) {
@@ -164,7 +165,7 @@ public final class DaemonListeners implements Disposable {
 
     connection.subscribe(EditorTrackerListener.TOPIC, new EditorTrackerListener() {
       @Override
-      public void activeEditorsChanged(@NotNull List<Editor> activeEditors) {
+      public void activeEditorsChanged(@NotNull List<? extends Editor> activeEditors) {
         if (myActiveEditors.equals(activeEditors)) {
           return;
         }
@@ -356,6 +357,8 @@ public final class DaemonListeners implements Disposable {
     restartOnExtensionChange(ExternalLanguageAnnotators.EP_NAME, "external annotators list changed");
 
     connection.subscribe(DynamicPluginListener.TOPIC, new DynamicPluginListener() {
+      private Disposable mySuspendUpdateOnTimerDisposable;
+
       @Override
       public void pluginLoaded(@NotNull IdeaPluginDescriptor pluginDescriptor) {
         PsiManager.getInstance(myProject).dropPsiCaches();
@@ -365,7 +368,9 @@ public final class DaemonListeners implements Disposable {
       @Override
       public void beforePluginUnload(@NotNull IdeaPluginDescriptor pluginDescriptor, boolean isUpdate) {
         PsiManager.getInstance(myProject).dropPsiCaches();
-        stopDaemon(false, "Plugin will be uninstalled");
+        mySuspendUpdateOnTimerDisposable = Disposer.newDisposable();
+        myDaemonCodeAnalyzer.cancelSubmittedPasses();
+        myDaemonCodeAnalyzer.disableUpdateByTimer(mySuspendUpdateOnTimerDisposable);
         removeHighlightersOnPluginUnload(pluginDescriptor);
         myDaemonCodeAnalyzer.clearProgressIndicator();
         myDaemonCodeAnalyzer.cleanAllFileLevelHighlights();
@@ -374,6 +379,8 @@ public final class DaemonListeners implements Disposable {
 
       @Override
       public void pluginUnloaded(@NotNull IdeaPluginDescriptor pluginDescriptor, boolean isUpdate) {
+        Disposer.dispose(mySuspendUpdateOnTimerDisposable);
+        mySuspendUpdateOnTimerDisposable = null;
         stopDaemonAndRestartAllFiles("Plugin unloaded");
       }
     });
@@ -413,18 +420,32 @@ public final class DaemonListeners implements Disposable {
   public static boolean canChangeFileSilently(@NotNull PsiFileSystemItem file) {
     Project project = file.getProject();
     DaemonListeners listeners = getInstance(project);
-    if (listeners == null) return true;
+    if (listeners == null) {
+      return true;
+    }
 
-    if (listeners.cutOperationJustHappened) return false;
+    if (listeners.cutOperationJustHappened) {
+      return false;
+    }
     VirtualFile virtualFile = file.getVirtualFile();
-    if (virtualFile == null) return false;
-    if (file instanceof PsiCodeFragment) return true;
-    if (ScratchUtil.isScratch(virtualFile)) return listeners.canUndo(virtualFile);
-    if (!ModuleUtilCore.projectContainsFile(project, virtualFile, false)) return false;
+    if (virtualFile == null) {
+      return false;
+    }
+    if (file instanceof PsiCodeFragment) {
+      return true;
+    }
+    if (ScratchUtil.isScratch(virtualFile)) {
+      return listeners.canUndo(virtualFile);
+    }
+    if (!ModuleUtilCore.projectContainsFile(project, virtualFile, false)) {
+      return false;
+    }
 
     for (SilentChangeVetoer extension : SilentChangeVetoer.EP_NAME.getExtensionList()) {
       ThreeState result = extension.canChangeFileSilently(project, virtualFile);
-      if (result != ThreeState.UNSURE) return result.toBoolean();
+      if (result != ThreeState.UNSURE) {
+        return result.toBoolean();
+      }
     }
 
     return listeners.canUndo(virtualFile);
@@ -458,9 +479,7 @@ public final class DaemonListeners implements Disposable {
     }
   }
 
-  private static final class Holder {
-    private static final String myCutActionName = ActionManager.getInstance().getAction(IdeActions.ACTION_EDITOR_CUT).getTemplatePresentation().getText();
-  }
+  private static String CUT_ACTION_NAME;
 
   private final class MyCommandListener implements CommandListener {
     @Override
@@ -470,10 +489,25 @@ public final class DaemonListeners implements Disposable {
         return;
       }
 
-      cutOperationJustHappened = Comparing.strEqual(Holder.myCutActionName, event.getCommandName());
-      if (!myDaemonCodeAnalyzer.isRunning()) return;
+      String commandName = event.getCommandName();
+
+      String cutActionName = CUT_ACTION_NAME;
+      if (cutActionName == null) {
+        ActionManager actionManager = ApplicationManager.getApplication().getServiceIfCreated(ActionManager.class);
+        if (actionManager != null) {
+          cutActionName = actionManager.getAction(IdeActions.ACTION_EDITOR_CUT).getTemplatePresentation().getText();
+          //noinspection AssignmentToStaticFieldFromInstanceMethod
+          CUT_ACTION_NAME = cutActionName;
+        }
+      }
+
+      cutOperationJustHappened = commandName != null && !commandName.isEmpty() && !commandName.startsWith("Editor") &&
+                                 commandName.equals(cutActionName);
+      if (!myDaemonCodeAnalyzer.isRunning()) {
+        return;
+      }
       if (LOG.isDebugEnabled()) {
-        LOG.debug("cancelling code highlighting by command:" + event.getCommand());
+        LOG.debug("cancelling code highlighting by command: " + event.getCommand());
       }
       stopDaemon(false, "Command start");
     }
@@ -585,11 +619,32 @@ public final class DaemonListeners implements Disposable {
   private void removeHighlightersOnPluginUnload(@NotNull PluginDescriptor pluginDescriptor) {
     for (FileEditor fileEditor : FileEditorManager.getInstance(myProject).getAllEditors()) {
       if (fileEditor instanceof TextEditor) {
+        boolean clearAll = false;
+        VirtualFile file = fileEditor.getFile();
+        if (file != null) {
+          ClassLoader classLoader = file.getFileType().getClass().getClassLoader();
+          if (classLoader instanceof PluginAwareClassLoader &&
+              ((PluginAwareClassLoader)classLoader).getPluginId().equals(pluginDescriptor.getPluginId())) {
+            clearAll = true;
+          }
+        }
+
         Editor editor = ((TextEditor)fileEditor).getEditor();
-        removeHighlightersOnPluginUnload(editor.getMarkupModel(), pluginDescriptor);
+        if (clearAll) {
+          editor.getMarkupModel().removeAllHighlighters();
+        }
+        else {
+          removeHighlightersOnPluginUnload(editor.getMarkupModel(), pluginDescriptor);
+        }
+
         MarkupModel documentMarkupModel = DocumentMarkupModel.forDocument(editor.getDocument(), myProject, false);
         if (documentMarkupModel != null) {
-          removeHighlightersOnPluginUnload(documentMarkupModel, pluginDescriptor);
+          if (clearAll) {
+            documentMarkupModel.removeAllHighlighters();
+          }
+          else {
+            removeHighlightersOnPluginUnload(documentMarkupModel, pluginDescriptor);
+          }
         }
       }
     }
@@ -599,31 +654,43 @@ public final class DaemonListeners implements Disposable {
     for (RangeHighlighter highlighter: model.getAllHighlighters()) {
       if (!(highlighter instanceof RangeHighlighterEx && ((RangeHighlighterEx)highlighter).isPersistent())) {
         model.removeHighlighter(highlighter);
-        return;
+        continue;
       }
 
       ClassLoader pluginClassLoader = pluginDescriptor.getPluginClassLoader();
       if (!(pluginClassLoader instanceof PluginAwareClassLoader)) {
-        return;
+        continue;
       }
 
-      CustomHighlighterRenderer renderer = highlighter.getCustomRenderer();
-      if (renderer != null && renderer.getClass().getClassLoader() == pluginClassLoader) {
+      if (isHighlighterFromPlugin(highlighter, pluginClassLoader)) {
         model.removeHighlighter(highlighter);
       }
-      else {
-        Object errorStripeTooltip = highlighter.getErrorStripeTooltip();
-        if (errorStripeTooltip instanceof HighlightInfo && ((HighlightInfo)errorStripeTooltip).quickFixActionMarkers != null) {
-          for (Pair<HighlightInfo.IntentionActionDescriptor, RangeMarker> marker : ((HighlightInfo)errorStripeTooltip).quickFixActionMarkers) {
-            IntentionAction intentionAction = IntentionActionDelegate.unwrap(marker.first.getAction());
-            if (intentionAction.getClass().getClassLoader() == pluginClassLoader ||
-                intentionAction instanceof QuickFixWrapper && ((QuickFixWrapper)intentionAction).getFix().getClass().getClassLoader() == pluginClassLoader) {
-              model.removeHighlighter(highlighter);
-              break;
-            }
-          }
+    }
+  }
+
+  private static boolean isHighlighterFromPlugin(RangeHighlighter highlighter, ClassLoader pluginClassLoader) {
+    CustomHighlighterRenderer renderer = highlighter.getCustomRenderer();
+    if (renderer != null && renderer.getClass().getClassLoader() == pluginClassLoader) {
+      return true;
+    }
+
+    Object errorStripeTooltip = highlighter.getErrorStripeTooltip();
+    if (errorStripeTooltip instanceof HighlightInfo && ((HighlightInfo)errorStripeTooltip).quickFixActionMarkers != null) {
+      for (Pair<HighlightInfo.IntentionActionDescriptor, RangeMarker> marker : ((HighlightInfo)errorStripeTooltip).quickFixActionMarkers) {
+        IntentionAction intentionAction = IntentionActionDelegate.unwrap(marker.first.getAction());
+        if (intentionAction.getClass().getClassLoader() == pluginClassLoader ||
+            intentionAction instanceof QuickFixWrapper && ((QuickFixWrapper)intentionAction).getFix().getClass().getClassLoader() ==
+                                                          pluginClassLoader) {
+          return true;
         }
       }
     }
+
+    LineMarkerInfo<?> info = LineMarkersUtil.getLineMarkerInfo(highlighter);
+    if (info != null && info.getClass().getClassLoader() == pluginClassLoader) {
+      return true;
+    }
+
+    return false;
   }
 }

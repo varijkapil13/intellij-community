@@ -2,6 +2,8 @@
 package com.intellij.openapi.extensions;
 
 import com.intellij.util.containers.CollectionFactory;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -17,11 +19,11 @@ public final class PluginId implements Comparable<PluginId> {
 
   private static final Map<String, PluginId> ourRegisteredIds = CollectionFactory.createSmallMemoryFootprintMap();
 
-  public static synchronized @NotNull PluginId getId(@NotNull String idString) {
+  public static synchronized @NotNull PluginId getId(@NotNull @NonNls String idString) {
     return ourRegisteredIds.computeIfAbsent(idString, PluginId::new);
   }
 
-  public static synchronized @Nullable PluginId findId(String @NotNull ... idStrings) {
+  public static synchronized @Nullable PluginId findId(@NonNls String @NotNull ... idStrings) {
     for (String idString : idStrings) {
       PluginId pluginId = ourRegisteredIds.get(idString);
       if (pluginId != null) {
@@ -35,6 +37,7 @@ public final class PluginId implements Comparable<PluginId> {
    * @deprecated Use {@link #getRegisteredIdList}.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static synchronized @NotNull Map<String, PluginId> getRegisteredIds() {
     return CollectionFactory.createSmallMemoryFootprintMap(ourRegisteredIds);
   }
@@ -45,11 +48,11 @@ public final class PluginId implements Comparable<PluginId> {
 
   private final String myIdString;
 
-  private PluginId(@NotNull String idString) {
+  private PluginId(@NotNull @NonNls String idString) {
     myIdString = idString;
   }
 
-  public @NotNull String getIdString() {
+  public @NotNull @NonNls String getIdString() {
     return myIdString;
   }
 

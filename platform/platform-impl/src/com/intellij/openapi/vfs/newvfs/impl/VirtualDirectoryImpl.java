@@ -15,8 +15,10 @@ import com.intellij.openapi.vfs.impl.win32.Win32LocalFileSystem;
 import com.intellij.openapi.vfs.newvfs.*;
 import com.intellij.openapi.vfs.newvfs.events.ChildInfo;
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent;
 import com.intellij.openapi.vfs.newvfs.persistent.FSRecords;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
+import com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl;
 import com.intellij.psi.impl.PsiCachedValue;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ArrayUtilRt;
@@ -26,6 +28,7 @@ import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.keyFMap.KeyFMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import org.jetbrains.annotations.ApiStatus;
@@ -71,8 +74,8 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
                                            boolean doRefresh,
                                            boolean ensureCanonicalName,
                                            @NotNull NewVirtualFileSystem delegate) {
-    boolean caseSensitive = isCaseSensitive();
-    VirtualFileSystemEntry result = doFindChild(name, ensureCanonicalName, delegate, caseSensitive);
+    updateCaseSensitivityIfUnknown(name);
+    VirtualFileSystemEntry result = doFindChild(name, ensureCanonicalName, delegate, isCaseSensitive());
 
     //noinspection UseVirtualFileEquals
     if (result == NULL_VIRTUAL_FILE) {
@@ -86,7 +89,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     return result;
   }
 
-  @Nullable // null if there can't be a child with this name, NULL_VIRTUAL_FILE
+  @Nullable // null if there can't be a child with this name, NULL_VIRTUAL_FILE it was adopted
   private VirtualFileSystemEntry doFindChildInArray(@NotNull String name) {
     if (myData.isAdoptedName(name)) return NULL_VIRTUAL_FILE;
     int[] array = myData.myChildrenIds;
@@ -188,6 +191,15 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     throw new InvalidVirtualFileAccessException(this);
   }
 
+  @ApiStatus.Internal
+  public void setCaseSensitivityFlag(@NotNull FileAttributes.CaseSensitivity sensitivity) {
+    VfsData vfsData = getVfsData();
+    VfsData.Segment segment = vfsData.getSegment(getId(), false);
+    int newFlags = (sensitivity == FileAttributes.CaseSensitivity.UNKNOWN ? 0 : VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED) |
+                   (sensitivity == FileAttributes.CaseSensitivity.SENSITIVE ? VfsDataFlags.CHILDREN_CASE_SENSITIVE : 0);
+    segment.setFlags(getId(), VfsDataFlags.CHILDREN_CASE_SENSITIVE | VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED, newFlags);
+  }
+
   // removes forward/back slashes from start/end and return trimmed name or null if there are slashes in the middle or it's empty
   private static String deSlash(@NotNull String name) {
     int startTrimmed = -1;
@@ -245,29 +257,39 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
     VfsData vfsData = getVfsData();
     VfsData.Segment segment = vfsData.getSegment(id, true);
-    VfsData.initFile(id, segment, nameId, PersistentFS.isDirectory(attributes) ? new VfsData.DirectoryData() : KeyFMap.EMPTY_MAP);
+    boolean isDirectory = PersistentFS.isDirectory(attributes);
+    VfsData.initFile(id, segment, nameId, isDirectory ? new VfsData.DirectoryData() : KeyFMap.EMPTY_MAP);
     LOG.assertTrue(!(getFileSystem() instanceof Win32LocalFileSystem));
 
     VirtualFileSystemEntry child = vfsData.getFileById(id, this, true);
     assert child != null;
-    int newFlags = (PersistentFS.isSymLink(attributes) ? IS_SYMLINK_FLAG : 0) |
-                   (PersistentFS.isSpecialFile(attributes) ? IS_SPECIAL_FLAG : 0) |
-                   (PersistentFS.isWritable(attributes) ? IS_WRITABLE_FLAG : 0) |
-                   (PersistentFS.isHidden(attributes) ? IS_HIDDEN_FLAG : 0) |
-                   (PersistentFS.isCaseSensitive(attributes) ? IS_CASE_SENSITIVE : 0);
-    segment.setFlags(id, IS_SYMLINK_FLAG | IS_SPECIAL_FLAG | IS_WRITABLE_FLAG | IS_HIDDEN_FLAG | IS_CASE_SENSITIVE, newFlags);
-    child.updateLinkStatus();
+    FileAttributes.CaseSensitivity sensitivity = isDirectory ? PersistentFS.areChildrenCaseSensitive(attributes) : FileAttributes.CaseSensitivity.UNKNOWN;
+    int newFlags = (PersistentFS.isSymLink(attributes) ? VfsDataFlags.IS_SYMLINK_FLAG : 0) |
+                   (PersistentFS.isSpecialFile(attributes) ? VfsDataFlags.IS_SPECIAL_FLAG : 0) |
+                   (PersistentFS.isWritable(attributes) ? VfsDataFlags.IS_WRITABLE_FLAG : 0) |
+                   (PersistentFS.isHidden(attributes) ? VfsDataFlags.IS_HIDDEN_FLAG : 0) |
+                   (sensitivity != FileAttributes.CaseSensitivity.UNKNOWN ? VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED : 0) |
+                   (sensitivity == FileAttributes.CaseSensitivity.SENSITIVE ? VfsDataFlags.CHILDREN_CASE_SENSITIVE : 0);
+    int relevantFlagsMask = VfsDataFlags.IS_SYMLINK_FLAG |
+               VfsDataFlags.IS_SPECIAL_FLAG |
+               VfsDataFlags.STRICT_PARENT_HAS_SYMLINK_FLAG |
+               VfsDataFlags.IS_WRITABLE_FLAG |
+               VfsDataFlags.IS_HIDDEN_FLAG |
+               VfsDataFlags.CHILDREN_CASE_SENSITIVE |
+               VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED;
+    segment.setFlags(id, relevantFlagsMask, newFlags);
+    child.updateLinkStatus(this);
 
     if (delegate.markNewFilesAsDirty()) {
       child.markDirty();
     }
-    if (PersistentFS.isDirectory(attributes) && child instanceof VirtualDirectoryImpl && isEmptyDirectory) {
+    if (isDirectory && child instanceof VirtualDirectoryImpl && isEmptyDirectory) {
       // when creating empty directory we need to make sure
       // every file created inside will fire "file created" event
       // in order to virtual file pointer manager get those events
       // to update its pointers properly
       // (because currently VirtualFilePointerManager ignores empty directory creation events for performance reasons)
-      ((VirtualDirectoryImpl)child).setChildrenLoaded();
+      ((VirtualDirectoryImpl)child).setAllChildrenLoaded();
     }
 
     return child;
@@ -275,17 +297,26 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
   @Nullable
   private VirtualFileSystemEntry createAndFindChildWithEventFire(@NotNull String name, @NotNull NewVirtualFileSystem delegate) {
-    final VirtualFile fake = new FakeVirtualFile(this, name);
-    final FileAttributes attributes = VfsImplUtil.getAttributesWithCaseSensitivity(delegate, fake);
+    VirtualFile fake = new FakeVirtualFile(this, name);
+    FileAttributes attributes = delegate.getAttributes(fake);
     if (attributes == null) return null;
-    final String realName = delegate.getCanonicallyCasedName(fake);
+    String realName = delegate.getCanonicallyCasedName(fake);
     boolean isDirectory = attributes.isDirectory();
     boolean isEmptyDirectory = isDirectory && !delegate.hasChildren(fake);
     String symlinkTarget = attributes.isSymLink() ? delegate.resolveSymLink(fake) : null;
     ChildInfo[] children = isEmptyDirectory ? ChildInfo.EMPTY_ARRAY : null;
     VFileCreateEvent event = new VFileCreateEvent(null, this, realName, isDirectory, attributes, symlinkTarget, true, children);
-    RefreshQueue.getInstance().processSingleEvent(event);
+    RefreshQueue.getInstance().processSingleEvent(false, event);
     return findChild(realName);
+  }
+
+  private void updateCaseSensitivityIfUnknown(@NotNull String childName) {
+    VFilePropertyChangeEvent caseSensitivityEvent = VfsImplUtil.generateCaseSensitivityChangedEventForUnknownCase(this, childName);
+    if (caseSensitivityEvent != null) {
+      PersistentFSImpl.executeChangeCaseSensitivity(this, (FileAttributes.CaseSensitivity)caseSensitivityEvent.getNewValue());
+      // fire event asynchronously to avoid deadlocks with possibly currently-held VFP/Refresh queue locks
+      RefreshQueue.getInstance().processSingleEvent(true, caseSensitivityEvent);
+    }
   }
 
   @Override
@@ -390,7 +421,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
           }
           return cmp;
         });
-        IntOpenHashSet prevChildren = new IntOpenHashSet(myData.myChildrenIds);
+        IntSet prevChildren = new IntOpenHashSet(myData.myChildrenIds);
         VfsData vfsData = getVfsData();
         for (int i = 0; i < children.size(); i++) {
           ChildInfo child = children.get(i);
@@ -415,7 +446,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
       myData.clearAdoptedNames();
       myData.myChildrenIds = result;
-      setChildrenLoaded();
+      setAllChildrenLoaded();
       if (CHECK) {
         assertConsistency(caseSensitive, children);
       }
@@ -470,7 +501,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
            + ") ";
   }
 
-  private static void error(@NonNls String message, VirtualFileSystemEntry[] array, @NonNls Object... details) {
+  private static void error(@NonNls String message, VirtualFileSystemEntry @NotNull [] array, @NonNls Object @NotNull ... details) {
     String children = StringUtil.join(array, VirtualDirectoryImpl::verboseToString, "\n");
     String detailsStr = StringUtil.join(ContainerUtil.<Object, Object>map(details, o -> o instanceof Object[] ? Arrays.toString((Object[])o) : o), "\n");
     throw new AssertionError(message + "; children: " + children + "\nDetails: " + detailsStr);
@@ -520,7 +551,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
         }
       }
       if (markAllChildrenLoaded) {
-        setChildrenLoaded();
+        setAllChildrenLoaded();
       }
       return;
     }
@@ -532,7 +563,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
     synchronized (myData) {
       int[] oldIds = myData.myChildrenIds;
-      IntArrayList mergedIds = new IntArrayList(oldIds.length + added.size());
+      IntList mergedIds = new IntArrayList(oldIds.length + added.size());
       //noinspection ForLoopReplaceableByForEach
       for (int i = 0; i < added.size(); i++) {
         ChildInfo info = added.get(i);
@@ -545,7 +576,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
         fileCreated.consume(file, info);
       }
       VfsData vfsData = getVfsData();
-      List<ChildInfo> existingChildren = new AbstractList<ChildInfo>() {
+      List<ChildInfo> existingChildren = new AbstractList<>() {
         @Override
         public ChildInfo get(int index) {
           int id = oldIds[index];
@@ -563,7 +594,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
       myData.myChildrenIds = mergedIds.toIntArray();
 
       if (markAllChildrenLoaded) {
-        setChildrenLoaded();
+        setAllChildrenLoaded();
       }
       assertConsistency(caseSensitive, added);
     }
@@ -576,15 +607,15 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
       myData.removeAdoptedName(childName);
       int indexInReal = findIndex(myData.myChildrenIds, childName);
       if (indexInReal < 0) {
-        insertChildAt(child, indexInReal);
+        int i = -indexInReal -1;
+        insertChildAt(child, i);
       }
       // else already stored
       assertConsistency(caseSensitive, child);
     }
   }
 
-  private void insertChildAt(@NotNull VirtualFileSystemEntry file, int negativeIndex) {
-    int i = -negativeIndex -1;
+  private void insertChildAt(@NotNull VirtualFileSystemEntry file, int i) {
     int id = file.getId();
     assert id > 0 : file +": "+id;
     myData.myChildrenIds = ArrayUtil.insert(myData.myChildrenIds, i, id);
@@ -635,15 +666,11 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     }
   }
 
+  @ApiStatus.Internal
   // check if all these names are not existing, remove invalid events from the list
-  public void validateChildrenToCreate(@NotNull List<VFileCreateEvent> childrenToCreate) {
+  public void validateChildrenToCreate(@NotNull Collection<VFileCreateEvent> childrenToCreate) {
     if (childrenToCreate.size() <= 1) {
-      for (int i = childrenToCreate.size() - 1; i >= 0; i--) {
-        VFileCreateEvent event = childrenToCreate.get(i);
-        if (!event.isValid()) {
-          childrenToCreate.remove(i);
-        }
-      }
+      childrenToCreate.removeIf(event -> !event.isValid());
       return;
     }
     boolean caseSensitive = isCaseSensitive();
@@ -671,24 +698,20 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
     }
   }
 
-  private void validateAgainst(@NotNull List<VFileCreateEvent> childrenToCreate, @NotNull Set<CharSequence> existingNames) {
-    for (int i = childrenToCreate.size() - 1; i >= 0; i--) {
-      VFileCreateEvent event = childrenToCreate.get(i);
+  private void validateAgainst(@NotNull Collection<VFileCreateEvent> childrenToCreate, @NotNull Set<? extends CharSequence> existingNames) {
+    childrenToCreate.removeIf(event -> {
       String childName = event.getChildName();
       // assume there is no need to canonicalize names in VFileCreateEvent
-      boolean childExists = !myData.isAdoptedName(childName) && existingNames.contains(childName);
-      if (childExists) {
-        childrenToCreate.remove(i);
-      }
-    }
+      return !myData.isAdoptedName(childName) && existingNames.contains(childName);
+    });
   }
 
   public boolean allChildrenLoaded() {
-    return getFlagInt(CHILDREN_CACHED);
+    return myData.allChildrenLoaded();
   }
 
-  private void setChildrenLoaded() {
-    setFlagInt(CHILDREN_CACHED, true);
+  private void setAllChildrenLoaded() {
+    myData.setAllChildrenLoaded();
   }
 
   @NotNull
@@ -725,7 +748,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
   }
 
   @Override
-  public InputStream getInputStream() throws IOException {
+  public @NotNull InputStream getInputStream() throws IOException {
     throw new IOException("getInputStream() must not be called against a directory: " + getUrl());
   }
 
@@ -770,7 +793,7 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
   static void checkLeaks(@NotNull KeyFMap newMap) {
     for (Key<?> key : newMap.getKeys()) {
-      if (key != null && newMap.get(key) instanceof PsiCachedValue) {
+      if (newMap.get(key) instanceof PsiCachedValue) {
         throw new AssertionError("Don't store CachedValue in VFS user data, since it leads to memory leaks");
       }
     }
@@ -778,6 +801,25 @@ public class VirtualDirectoryImpl extends VirtualFileSystemEntry {
 
   @Override
   public boolean isCaseSensitive() {
-    return getFlagInt(IS_CASE_SENSITIVE);
+    return isChildrenCaseSensitivityKnown() ? getFlagInt(VfsDataFlags.CHILDREN_CASE_SENSITIVE) : super.isCaseSensitive();
+  }
+
+  /**
+   * @return value of CHILDREN_CASE_SENSITIVITY_CACHED bit
+   */
+  @ApiStatus.Internal
+  private boolean isChildrenCaseSensitivityKnown() {
+    return getFlagInt(VfsDataFlags.CHILDREN_CASE_SENSITIVITY_CACHED);
+  }
+
+  /**
+   * @return value of CHILDREN_CASE_SENSITIVE bit, if CHILDREN_CASE_SENSITIVITY_CACHED bit is set or UNKNOWN otherwise
+   */
+  @ApiStatus.Internal
+  @NotNull
+  public FileAttributes.CaseSensitivity getChildrenCaseSensitivity() {
+    return isChildrenCaseSensitivityKnown() ?
+           isCaseSensitive() ? FileAttributes.CaseSensitivity.SENSITIVE : FileAttributes.CaseSensitivity.INSENSITIVE
+           : FileAttributes.CaseSensitivity.UNKNOWN;
   }
 }

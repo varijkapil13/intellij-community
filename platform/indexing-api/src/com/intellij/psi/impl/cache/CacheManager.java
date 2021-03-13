@@ -11,16 +11,20 @@ import com.intellij.psi.search.PsiSearchHelper;
 import com.intellij.psi.search.UsageSearchContext;
 import com.intellij.util.Processor;
 import org.intellij.lang.annotations.MagicConstant;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 
 /**
  * Provides low-level identifier search for a project.
+ * <p>
  * Basically it uses {@link com.intellij.psi.impl.cache.impl.id.IdIndex} data,
- * so some custom language implementation may filter out some words on indexing stage {@link BaseFilterLexer}.
- *
- * Similar to {@link PsiSearchHelper} but doesn't operate with {@link PsiFile}-s.
+ * so some custom language implementation may filter out some words on indexing stage {@link com.intellij.psi.impl.cache.impl.BaseFilterLexer}.
+ * </p>
+ * <p>
+ * Similar to {@link PsiSearchHelper}, but doesn't operate with {@link PsiFile}-s.
+ * </p>
  */
 public interface CacheManager {
 
@@ -32,6 +36,7 @@ public interface CacheManager {
      * @deprecated use {@link CacheManager#getInstance(Project)}
      */
     @Deprecated
+    @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
     public static CacheManager getInstance(Project project) {
       return ServiceManager.getService(project, CacheManager.class);
     }

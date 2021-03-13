@@ -224,9 +224,6 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     myModulePathsToLoad.clear();
   }
 
-  protected void unloadNewlyAddedModulesIfPossible(@NotNull Set<ModulePath> modulesToLoad, @NotNull List<UnloadedModuleDescriptionImpl> modulesToUnload) {
-  }
-
   @NotNull
   // returns mutable linked hash set
   public static Set<ModulePath> getPathsToModuleFiles(@NotNull Element element) {
@@ -390,6 +387,7 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
     return myModulePathsToLoad == null ? 0 : myModulePathsToLoad.size();
   }
 
+  @Override
   public boolean areModulesLoaded() {
     return myModulesLoaded;
   }
@@ -945,7 +943,7 @@ public abstract class ModuleManagerImpl extends ModuleManagerEx implements Dispo
 
     @NotNull
     private Graph<Module> moduleGraph(final boolean includeTests) {
-      return GraphGenerator.generate(CachingSemiGraph.cache(new InboundSemiGraph<Module>() {
+      return GraphGenerator.generate(CachingSemiGraph.cache(new InboundSemiGraph<>() {
         @NotNull
         @Override
         public Collection<Module> getNodes() {

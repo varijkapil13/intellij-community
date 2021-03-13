@@ -3,7 +3,6 @@ package com.intellij.ide.util;
 
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Element;
 import org.jdom.Verifier;
@@ -14,12 +13,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PropertiesComponentImpl extends PropertiesComponent implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance(PropertiesComponentImpl.class);
 
-  private final Map<String, String> myMap = new ConcurrentHashMap<>();
+  private final Map<@NonNls String, @NonNls String> myMap = new ConcurrentHashMap<>();
 
   @NonNls private static final String ELEMENT_PROPERTY = "property";
   @NonNls private static final String ATTRIBUTE_NAME = "name";
@@ -66,7 +66,7 @@ public class PropertiesComponentImpl extends PropertiesComponent implements Pers
   }
 
   @Override
-  public @NlsSafe String getValue(@NotNull String name) {
+  public String getValue(@NotNull String name) {
     return myMap.get(name);
   }
 
@@ -145,5 +145,9 @@ public class PropertiesComponentImpl extends PropertiesComponent implements Pers
     else {
       setValue(name, StringUtil.join(values, "\n"));
     }
+  }
+
+  public Set<String> getKeys() {
+    return myMap.keySet();
   }
 }

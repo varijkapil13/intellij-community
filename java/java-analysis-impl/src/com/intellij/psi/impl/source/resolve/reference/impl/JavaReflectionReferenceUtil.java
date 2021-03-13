@@ -729,8 +729,7 @@ public final class JavaReflectionReferenceUtil {
       return getText(false, PsiNameHelper::getShortClassName);
     }
 
-    @Nullable
-    public Icon getIcon() {
+    public @NotNull Icon getIcon() {
       return myIcon != null ? myIcon : PlatformIcons.METHOD_ICON;
     }
 
@@ -754,7 +753,7 @@ public final class JavaReflectionReferenceUtil {
 
     @Override
     public int hashCode() {
-      return Objects.hash(myReturnType, myArgumentTypes);
+      return Objects.hash(myReturnType, Arrays.hashCode(myArgumentTypes));
     }
 
     @Override

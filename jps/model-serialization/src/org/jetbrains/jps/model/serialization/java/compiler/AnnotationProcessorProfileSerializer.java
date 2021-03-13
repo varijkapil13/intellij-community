@@ -16,6 +16,7 @@ public final class AnnotationProcessorProfileSerializer {
   private static final String NAME = "name";
   private static final String VALUE = "value";
   private static final String ENABLED = "enabled";
+  private static final String PROC_ONLY = "procOnly";
   private static final String OPTION = "option";
   private static final String MODULE = "module";
   private static final String USE_CLASSPATH = "useClasspath";
@@ -24,6 +25,7 @@ public final class AnnotationProcessorProfileSerializer {
   public static void readExternal(ProcessorConfigProfile profile, Element element) {
     profile.setName(element.getAttributeValue(NAME, ""));
     profile.setEnabled(Boolean.valueOf(element.getAttributeValue(ENABLED, "false")));
+    profile.setProcOnly(Boolean.valueOf(element.getAttributeValue(PROC_ONLY, "false")));
 
     final Element srcOutput = element.getChild("sourceOutputDir");
     final String out = srcOutput != null ? srcOutput.getAttributeValue(NAME) : null;
@@ -39,18 +41,17 @@ public final class AnnotationProcessorProfileSerializer {
     }
 
     profile.clearProcessorOptions();
-    for (Object optionElement : element.getChildren(OPTION)) {
-      final Element elem = (Element)optionElement;
-      final String key = elem.getAttributeValue(NAME);
-      final String value = elem.getAttributeValue(VALUE);
+    for (Element optionElement : element.getChildren(OPTION)) {
+      final String key = optionElement.getAttributeValue(NAME);
+      final String value = optionElement.getAttributeValue(VALUE);
       if (!StringUtil.isEmptyOrSpaces(key) && value != null) {
         profile.setOption(key, value);
       }
     }
 
     profile.clearProcessors();
-    for (Object procElement : element.getChildren("processor")) {
-      final String name = ((Element)procElement).getAttributeValue(NAME);
+    for (Element procElement : element.getChildren("processor")) {
+      final String name = procElement.getAttributeValue(NAME);
       if (!StringUtil.isEmptyOrSpaces(name)) {
         profile.addProcessor(name);
       }
@@ -61,8 +62,8 @@ public final class AnnotationProcessorProfileSerializer {
       profile.setObtainProcessorsFromClasspath(Boolean.parseBoolean(pathElement.getAttributeValue(USE_CLASSPATH, "true")));
       profile.setUseProcessorModulePath(Boolean.parseBoolean(pathElement.getAttributeValue(USE_PROC_MODULE_PATH, "false")));
       final StringBuilder pathBuilder = new StringBuilder();
-      for (Object entry : pathElement.getChildren(ENTRY)) {
-        final String path = ((Element)entry).getAttributeValue(NAME);
+      for (Element entry : pathElement.getChildren(ENTRY)) {
+        final String path = entry.getAttributeValue(NAME);
         if (!StringUtil.isEmptyOrSpaces(path)) {
           if (pathBuilder.length() > 0) {
             pathBuilder.append(File.pathSeparator);
@@ -74,8 +75,8 @@ public final class AnnotationProcessorProfileSerializer {
     }
 
     profile.clearModuleNames();
-    for (Object moduleElement : element.getChildren(MODULE)) {
-      final String name = ((Element)moduleElement).getAttributeValue(NAME);
+    for (Element moduleElement : element.getChildren(MODULE)) {
+      final String name = moduleElement.getAttributeValue(NAME);
       if (!StringUtil.isEmptyOrSpaces(name)) {
         profile.addModuleName(name);
       }
@@ -87,7 +88,9 @@ public final class AnnotationProcessorProfileSerializer {
     if (profile.isEnabled()) {
       element.setAttribute(ENABLED, Boolean.toString(profile.isEnabled()));
     }
-
+    if (profile.isProcOnly()) {
+      element.setAttribute(PROC_ONLY, Boolean.toString(profile.isProcOnly()));
+    }
     final String srcDirName = profile.getGeneratedSourcesDirectoryName(false);
     if (!StringUtil.equals(ProcessorConfigProfile.DEFAULT_PRODUCTION_DIR_NAME, srcDirName)) {
       addChild(element, "sourceOutputDir").setAttribute(NAME, FileUtil.toSystemIndependentName(srcDirName));

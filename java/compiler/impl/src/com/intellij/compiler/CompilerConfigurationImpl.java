@@ -120,8 +120,8 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
 
       @Override
       public void modulesRenamed(@NotNull Project project,
-                                 @NotNull List<Module> modules,
-                                 @NotNull Function<Module, String> oldNameProvider) {
+                                 @NotNull List<? extends Module> modules,
+                                 @NotNull Function<? super Module, String> oldNameProvider) {
         updateModuleNames(modules.stream().collect(Collectors.toMap(oldNameProvider::fun, Module::getName)));
       }
     });
@@ -155,7 +155,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
 
       private void clearState() {
         if (project.isOpen()) {
-          BuildManager.getInstance().clearState(project);
+          clearBuildManagerState(project);
         }
       }
     });
@@ -285,7 +285,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
     }
 
     if (updated) {
-      BuildManager.getInstance().clearState(myProject);
+      clearBuildManagerState(myProject);
     }
   }
 
@@ -293,9 +293,28 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
   public void setProjectBytecodeTarget(@Nullable String level) {
     final String previous = myBytecodeTargetLevel;
     myBytecodeTargetLevel = level;
-    if (!myProject.isDefault() && !Objects.equals(previous, level)) {
-      BuildManager.getInstance().clearState(myProject);
+    if (!Objects.equals(previous, level)) {
+      clearBuildManagerState(myProject);
     }
+  }
+
+  @Override
+  public boolean isParallelCompilationEnabled() {
+    // returns parallel compilation flag first by looking into workspace.xml and then intellij.yaml
+
+    //noinspection deprecation
+    Boolean workspaceParallelCompilation = CompilerWorkspaceConfiguration.getInstance(myProject).PARALLEL_COMPILATION;
+    if (workspaceParallelCompilation != null) {
+      return workspaceParallelCompilation;
+    }
+
+    return CompilerConfigurationSettings.Companion.getInstance(myProject).isParallelCompilationEnabled();
+  }
+
+  @Override
+  public void setParallelCompilationEnabled(boolean enabled) {
+    //noinspection deprecation
+    CompilerWorkspaceConfiguration.getInstance(myProject).PARALLEL_COMPILATION = enabled;
   }
 
   @Override
@@ -315,11 +334,11 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
   }
 
   public void setModulesBytecodeTargetMap(@NotNull Map<String, String> mapping) {
-    final boolean shouldNotify = !myProject.isDefault() && !myModuleBytecodeTarget.equals(mapping);
+    final boolean shouldNotify = !myModuleBytecodeTarget.equals(mapping);
     myModuleBytecodeTarget.clear();
     myModuleBytecodeTarget.putAll(mapping);
     if (shouldNotify) {
-      BuildManager.getInstance().clearState(myProject);
+      clearBuildManagerState(myProject);
     }
   }
 
@@ -337,10 +356,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
       previous = myModuleBytecodeTarget.put(module.getName(), level);
     }
     if (!Objects.equals(previous, level)) {
-      final Project project = module.getProject();
-      if (!project.isDefault()) {
-        BuildManager.getInstance().clearState(project);
-      }
+      clearBuildManagerState(module.getProject());
     }
   }
 
@@ -394,7 +410,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
     String newValue = ParametersListUtil.join(options);
     if (!newValue.equals(previous)) {
       settings.ADDITIONAL_OPTIONS_OVERRIDE.put(module.getName(), newValue);
-      BuildManager.getInstance().clearState(myProject);
+      clearBuildManagerState(myProject);
     }
   }
 
@@ -740,11 +756,6 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
           break;
         }
       }
-      if (myState.BUILD_PROCESS_HEAP_SIZE == DEFAULT_BUILD_PROCESS_HEAP_SIZE) {
-        final CompilerWorkspaceConfiguration workspace = CompilerWorkspaceConfiguration.getInstance(myProject);
-        // older version compatibility: as a fallback load this setting from workspace
-        myState.BUILD_PROCESS_HEAP_SIZE = workspace.COMPILER_PROCESS_HEAP_SIZE;
-      }
     }
 
     final Element notNullAssertions = parentNode.getChild(JpsJavaCompilerConfigurationSerializer.ADD_NOTNULL_ASSERTIONS);
@@ -761,8 +772,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
       removeRegexpPatterns();
       node = parentNode.getChild(JpsJavaCompilerConfigurationSerializer.RESOURCE_EXTENSIONS);
       if (node != null) {
-        for (final Object o : node.getChildren(JpsJavaCompilerConfigurationSerializer.ENTRY)) {
-          Element element = (Element)o;
+        for (final Element element : node.getChildren(JpsJavaCompilerConfigurationSerializer.ENTRY)) {
           String pattern = element.getAttributeValue(JpsJavaCompilerConfigurationSerializer.NAME);
           if (!StringUtil.isEmpty(pattern)) {
             addRegexpPattern(pattern);
@@ -841,8 +851,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
     final Set<String> processors = new HashSet<>();
     final List<Couple<String>> modulesToProcess = new ArrayList<>();
 
-    for (Object child : processing.getChildren("processorPath")) {
-      final Element pathElement = (Element)child;
+    for (Element pathElement : processing.getChildren("processorPath")) {
       final String path = pathElement.getAttributeValue("value", (String)null);
       if (path != null) {
         if (processorPath.length() > 0) {
@@ -852,8 +861,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
       }
     }
 
-    for (Object child : processing.getChildren("processor")) {
-      final Element processorElement = (Element)child;
+    for (Element processorElement : processing.getChildren("processor")) {
       final String proc = processorElement.getAttributeValue(JpsJavaCompilerConfigurationSerializer.NAME, (String)null);
       if (proc != null) {
         processors.add(proc);
@@ -865,8 +873,7 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
       }
     }
 
-    for (Object child : processing.getChildren("processModule")) {
-      final Element moduleElement = (Element)child;
+    for (Element moduleElement : processing.getChildren("processModule")) {
       final String name = moduleElement.getAttributeValue(JpsJavaCompilerConfigurationSerializer.NAME, (String)null);
       if (name == null) {
         continue;
@@ -1052,6 +1059,12 @@ public class CompilerConfigurationImpl extends CompilerConfiguration implements 
     }
     final Collection<? extends Artifact> artifacts = ArtifactBySourceFileFinder.getInstance(project).findArtifacts(file);
     return artifacts.isEmpty();
+  }
+
+  private static void clearBuildManagerState(Project project) {
+    if (!project.isDefault()) {
+      BuildManager.getInstance().clearState(project);
+    }
   }
 
   private static final class CompiledPattern {

@@ -4,6 +4,7 @@ package com.intellij.lang.properties.references;
 import com.intellij.ide.fileTemplates.FileTemplate;
 import com.intellij.ide.fileTemplates.FileTemplateManager;
 import com.intellij.ide.fileTemplates.FileTemplateUtil;
+import com.intellij.ide.highlighter.XmlFileType;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.ide.util.TreeFileChooser;
 import com.intellij.ide.util.TreeFileChooserFactory;
@@ -21,11 +22,13 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -75,13 +78,13 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
   protected final DialogCustomization myCustomization;
 
   public static class DialogCustomization {
-    private final String title;
+    private final @NlsContexts.DialogTitle String title;
     private final boolean suggestExistingProperties;
     private final boolean focusValueComponent;
     private final List<PropertiesFile> propertiesFiles;
     private final String suggestedName;
 
-    public DialogCustomization(String title, boolean suggestExistingProperties, boolean focusValueComponent,
+    public DialogCustomization(@NlsContexts.DialogTitle String title, boolean suggestExistingProperties, boolean focusValueComponent,
                                List<PropertiesFile> propertiesFiles,
                                String suggestedName) {
       this.title = title;
@@ -137,7 +140,9 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
         fileChooser.showDialog();
         PsiFile selectedFile = fileChooser.getSelectedFile();
         if (selectedFile == null) return;
-        myPropertiesFile.setText(FileUtil.toSystemDependentName(selectedFile.getVirtualFile().getPath()));
+        String selectedPath = selectedFile.getVirtualFile().getPath();
+        myPropertiesFile.setText(FileUtil.toSystemDependentName(selectedPath));
+        myPropertiesFile.setSelectedItem(FileUtil.toSystemDependentName(selectedPath));
       }
     }), BorderLayout.CENTER);
 
@@ -175,7 +180,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       }
     });
     
-    myExistingProperties.setRenderer(new ColoredListCellRenderer<IProperty>() {
+    myExistingProperties.setRenderer(new ColoredListCellRenderer<>() {
       @Override
       protected void customizeCellRenderer(@NotNull JList<? extends IProperty> list,
                                            IProperty value,
@@ -387,9 +392,9 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
   }
 
   private void populatePropertiesFiles() {
-    List<String> paths = suggestPropertiesFiles();
-    final String lastUrl = suggestSelectedFileUrl(paths);
-    final String lastPath = lastUrl == null ? null : FileUtil.toSystemDependentName(VfsUtil.urlToPath(lastUrl));
+    List<@NlsSafe String> paths = suggestPropertiesFiles();
+    final String lastUrl = suggestSelectedFileUrl();
+    final String lastPath = lastUrl == null ? null : FileUtil.toSystemDependentName(VfsUtilCore.urlToPath(lastUrl));
     if (lastPath != null) {
       paths.remove(lastPath);
       paths.add(0, lastPath);
@@ -406,18 +411,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
     }
   }
 
-  private String suggestSelectedFileUrl(List<String> paths) {
-    if (myDefaultPropertyValue != null) {
-      for (String path : paths) {
-        VirtualFile file = LocalFileSystem.getInstance().findFileByPath(FileUtil.toSystemIndependentName(path));
-        if (file == null) continue;
-        PsiFile psiFile = myContext.getManager().findFile(file);
-        if (!(psiFile instanceof PropertiesFile)) continue;
-        for (IProperty property : ((PropertiesFile)psiFile).getProperties()) {
-          if (property.getValue().equals(myDefaultPropertyValue)) return path;
-        }
-      }
-    }
+  private String suggestSelectedFileUrl() {
     return LastSelectedPropertiesFileStore.getInstance().suggestLastSelectedPropertiesFileUrl(myContext);
   }
 
@@ -485,7 +479,7 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
       return false;
     }
     final FileType fileType = FileTypeManager.getInstance().getFileTypeByFileName(FileUtil.toSystemIndependentName(path));
-    if (fileType != PropertiesFileType.INSTANCE && fileType != StdFileTypes.XML) {
+    if (fileType != PropertiesFileType.INSTANCE && fileType != XmlFileType.INSTANCE) {
       String message = PropertiesBundle.message("i18nize.cant.create.properties.file.because.its.name.is.associated",
                                                 getPropertiesFilePath(), fileType.getDescription());
       Messages.showErrorDialog(myProject, message, PropertiesBundle.message("i18nize.error.creating.properties.file"));
@@ -509,7 +503,6 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
           }
           else {
             FileTemplate template = FileTemplateManager.getInstance(myProject).getInternalTemplate("XML Properties File.xml");
-            LOG.assertTrue(template != null);
             return (PsiFile)FileTemplateUtil.createFromTemplate(template, file.getName(), null, psiManager.findDirectory(dir));
           }
         }
@@ -534,13 +527,13 @@ public class I18nizeQuickFixDialog extends DialogWrapper implements I18nizeQuick
 
   @Override
   public void dispose() {
-    saveLastSelectedFile();
     super.dispose();
   }
 
   @Override
   protected void doOKAction() {
     if (!createPropertiesFileIfNotExists()) return;
+    saveLastSelectedFile();
     Collection<PropertiesFile> propertiesFiles = getAllPropertiesFiles();
     for (PropertiesFile propertiesFile : propertiesFiles) {
       IProperty existingProperty = propertiesFile.findPropertyByKey(getKey());

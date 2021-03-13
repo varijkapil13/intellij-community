@@ -50,7 +50,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
-import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -111,7 +110,7 @@ public class LibraryOptionsPanel implements Disposable {
     final DownloadableLibraryDescription description = getDownloadableDescription(libraryDescription);
     if (description != null) {
       showCard("loading");
-      description.fetchVersions(new DownloadableFileSetVersions.FileSetVersionsCallback<FrameworkLibraryVersion>() {
+      description.fetchVersions(new DownloadableFileSetVersions.FileSetVersionsCallback<>() {
         @Override
         public void onSuccess(@NotNull final List<? extends FrameworkLibraryVersion> versions) {
           SwingUtilities.invokeLater(() -> {
@@ -218,7 +217,7 @@ public class LibraryOptionsPanel implements Disposable {
         onVersionChanged(getPresentableVersion());
       }
     });
-    myExistingLibraryComboBox.setRenderer(new ColoredListCellRenderer<LibraryEditor>() {
+    myExistingLibraryComboBox.setRenderer(new ColoredListCellRenderer<>() {
       @Override
       protected void customizeCellRenderer(@NotNull JList<? extends LibraryEditor> list, LibraryEditor value, int index, boolean selected,
                                            boolean hasFocus) {
@@ -233,7 +232,7 @@ public class LibraryOptionsPanel implements Disposable {
         else if (value instanceof NewLibraryEditor) {
           setIcon(PlatformIcons.LIBRARY_ICON);
           final String name = value.getName();
-          append(name != null ? name : JavaUiBundle.message("library.options.panel.existing.library.combobox.label.unnamed"));
+          append(name != null ? name : JavaUiBundle.message("unnamed.title"));
         }
       }
     });
@@ -295,8 +294,12 @@ public class LibraryOptionsPanel implements Disposable {
       case DOWNLOAD:
         final LibraryDownloadSettings oldDownloadSettings = mySettings.getDownloadSettings();
         LOG.assertTrue(oldDownloadSettings != null);
+        List<? extends FrameworkLibraryVersion> versions = mySettings.getCompatibleVersions();
+        if (versions.isEmpty()) {
+          LOG.error("No compatible version for " + mySettings.getLibraryDescription() + " with filter " + mySettings.getVersionFilter());
+        }
         final LibraryDownloadSettings newDownloadSettings = DownloadingOptionsDialog.showDialog(myPanel, oldDownloadSettings,
-                                                                                                mySettings.getCompatibleVersions(), true);
+                                                                                                versions, true);
         if (newDownloadSettings != null) {
           mySettings.setDownloadSettings(newDownloadSettings);
         }
@@ -431,7 +434,7 @@ public class LibraryOptionsPanel implements Disposable {
                                       libraryEditor.getName(), libraryEditor.getFiles(OrderRootType.CLASSES).length);
         }
         else {
-          message = MessageFormat.format("<b>{0}</b> library will be used", ((ExistingLibraryEditor)item).getName());
+          message = JavaUiBundle.message("label.existing.library.will.be.used", ((ExistingLibraryEditor)item).getName());
         }
         break;
       default:

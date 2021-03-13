@@ -182,5 +182,14 @@
     <extensionPoint name="vcs.consoleFolding"
                     interface="com.intellij.vcs.console.VcsConsoleFolding"
                     dynamic="true"/>
+
+    <extensionPoint name="vcs.changeListChangeAssigner"
+                    interface="com.intellij.openapi.vcs.changes.ChangeListChangeAssigner"
+                    area="IDEA_PROJECT"
+                    dynamic="true"/>
+
+    <extensionPoint name="vcs.delayedCommitMessageProvider"
+                    interface="com.intellij.vcs.commit.DelayedCommitMessageProvider"
+                    dynamic="true"/>
   </extensionPoints>
 </idea-plugin>

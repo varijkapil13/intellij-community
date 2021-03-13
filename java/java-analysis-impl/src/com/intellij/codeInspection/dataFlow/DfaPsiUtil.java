@@ -7,11 +7,13 @@ import com.intellij.codeInsight.NullabilityAnnotationInfo;
 import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
 import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
+import com.intellij.codeInspection.dataFlow.instructions.FinishElementInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.Instruction;
 import com.intellij.codeInspection.dataFlow.instructions.MethodCallInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.ReturnInstruction;
 import com.intellij.codeInspection.dataFlow.types.DfType;
 import com.intellij.codeInspection.dataFlow.types.DfTypes;
+import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
 import com.intellij.codeInspection.util.OptionalUtil;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.Ref;
@@ -29,6 +31,8 @@ import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.containers.Stack;
 import com.siyeh.ig.callMatcher.CallMatcher;
+import com.siyeh.ig.psiutils.ClassUtils;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -76,9 +80,9 @@ public final class DfaPsiUtil {
       return Nullability.NOT_NULL;
     }
 
-    Nullability fromAnnotation = getNullabilityFromAnnotation(owner, ignoreParameterNullabilityInference);
-    if (fromAnnotation != Nullability.UNKNOWN) {
-      return fromAnnotation;
+    NullabilityAnnotationInfo fromAnnotation = getNullabilityFromAnnotation(owner, ignoreParameterNullabilityInference);
+    if (fromAnnotation != null) {
+      return fromAnnotation.getNullability();
     }
 
     if (owner instanceof PsiMethod && isMapMethodWithUnknownNullity((PsiMethod)owner)) {
@@ -102,18 +106,20 @@ public final class DfaPsiUtil {
     return Nullability.UNKNOWN;
   }
 
-  @NotNull
-  private static Nullability getNullabilityFromAnnotation(PsiModifierListOwner owner, boolean ignoreParameterNullabilityInference) {
+  private static @Nullable NullabilityAnnotationInfo getNullabilityFromAnnotation(@NotNull PsiModifierListOwner owner,
+                                                                                  boolean ignoreParameterNullabilityInference) {
     NullableNotNullManager manager = NullableNotNullManager.getInstance(owner.getProject());
     NullabilityAnnotationInfo info = manager.findEffectiveNullabilityInfo(owner);
-    if (info == null) {
-      return Nullability.UNKNOWN;
+    if (info == null || shouldIgnoreAnnotation(info.getAnnotation())) {
+      return null;
     }
-    if (ignoreParameterNullabilityInference && owner instanceof PsiParameter && AnnotationUtil.isInferredAnnotation(info.getAnnotation())) {
+    if (ignoreParameterNullabilityInference && owner instanceof PsiParameter && info.isInferred()) {
       List<PsiParameter> supers = AnnotationUtil.getSuperAnnotationOwners((PsiParameter)owner);
-      return ContainerUtil.exists(supers, each -> manager.isNullable(each, false)) ? Nullability.NULLABLE :  Nullability.UNKNOWN;
+      return StreamEx.of(supers).map(param -> manager.findEffectiveNullabilityInfo(param))
+        .findFirst(i -> i != null && i.getInheritedFrom() == null && i.getNullability() == Nullability.NULLABLE)
+        .orElse(null);
     }
-    return info.getNullability();
+    return info;
   }
 
   private static boolean isMapMethodWithUnknownNullity(@NotNull PsiMethod method) {
@@ -184,11 +190,11 @@ public final class DfaPsiUtil {
     for (PsiAnnotation annotation : eachType.getAnnotations()) {
       String qualifiedName = annotation.getQualifiedName();
       NullableNotNullManager nnn = NullableNotNullManager.getInstance(annotation.getProject());
-      if (nnn.getNullables().contains(qualifiedName)) {
-        return new NullabilityAnnotationInfo(annotation, Nullability.NULLABLE, false);
-      }
-      if (nnn.getNotNulls().contains(qualifiedName)) {
-        return new NullabilityAnnotationInfo(annotation, Nullability.NOT_NULL, false);
+      Optional<Nullability> optionalNullability = nnn.getAnnotationNullability(qualifiedName);
+      if (optionalNullability.isPresent()) {
+        Nullability nullability = optionalNullability.get();
+        if (nullability == Nullability.NULLABLE && shouldIgnoreAnnotation(annotation)) continue;
+        return new NullabilityAnnotationInfo(annotation, nullability, false);
       }
     }
     if (eachType instanceof PsiClassType) {
@@ -198,6 +204,15 @@ public final class DfaPsiUtil {
       }
     }
     return null;
+  }
+
+  private static boolean shouldIgnoreAnnotation(PsiAnnotation annotation) {
+    PsiClass containingClass = ClassUtils.getContainingClass(annotation);
+    if (containingClass == null) return false;
+    String qualifiedName = containingClass.getQualifiedName();
+    // We deliberately ignore nullability annotations on Guava functional interfaces to avoid noise warnings
+    // See IDEA-170548 for details
+    return "com.google.common.base.Predicate".equals(qualifiedName) || "com.google.common.base.Function".equals(qualifiedName);
   }
 
   /**
@@ -274,30 +289,37 @@ public final class DfaPsiUtil {
     PsiClass containingClass = field.getContainingClass();
     if (containingClass == null) return false;
 
+    boolean staticField = field.hasModifierProperty(PsiModifier.STATIC);
+    for (PsiClassInitializer initializer : containingClass.getInitializers()) {
+      if (initializer.getLanguage().isKindOf(JavaLanguage.INSTANCE) &&
+          initializer.hasModifierProperty(PsiModifier.STATIC) == staticField &&
+          getBlockNotNullFields(containingClass, initializer.getBody()).contains(field)) {
+        return true;
+      }
+    }
+    if (staticField) return false;
+
     PsiMethod[] constructors = containingClass.getConstructors();
     if (constructors.length == 0) return false;
 
     for (PsiMethod method : constructors) {
-      if (!getNotNullInitializedFields(method, containingClass).contains(field)) {
+      if (!method.getLanguage().isKindOf(JavaLanguage.INSTANCE) ||
+          !getBlockNotNullFields(containingClass, method.getBody()).contains(field)) {
         return false;
       }
     }
     return true;
   }
 
-  private static Set<PsiField> getNotNullInitializedFields(final PsiMethod constructor, final PsiClass containingClass) {
-    if (!constructor.getLanguage().isKindOf(JavaLanguage.INSTANCE)) return Collections.emptySet();
-
-    final PsiCodeBlock body = constructor.getBody();
+  private static Set<PsiField> getBlockNotNullFields(PsiClass containingClass, PsiCodeBlock body) {
     if (body == null) return Collections.emptySet();
 
-    return CachedValuesManager.getCachedValue(constructor, new CachedValueProvider<Set<PsiField>>() {
+    return CachedValuesManager.getCachedValue(body, new CachedValueProvider<>() {
       @NotNull
       @Override
       public Result<Set<PsiField>> compute() {
-        final PsiCodeBlock body = constructor.getBody();
         final Map<PsiField, Boolean> map = new HashMap<>();
-        final DataFlowRunner dfaRunner = new DataFlowRunner(constructor.getProject()) {
+        final DataFlowRunner dfaRunner = new DataFlowRunner(body.getProject()) {
           PsiElement currentBlock;
 
           private boolean isCallExposingNonInitializedFields(Instruction instruction) {
@@ -345,15 +367,24 @@ public final class DfaPsiUtil {
           }
 
           @Override
-          protected DfaInstructionState @NotNull [] acceptInstruction(@NotNull InstructionVisitor visitor, @NotNull DfaInstructionState instructionState) {
+          protected DfaInstructionState @NotNull [] acceptInstruction(@NotNull InstructionVisitor visitor,
+                                                                      @NotNull DfaInstructionState instructionState) {
             Instruction instruction = instructionState.getInstruction();
+            if (instruction instanceof FinishElementInstruction) {
+              Set<DfaVariableValue> vars = ((FinishElementInstruction)instruction).getVarsToFlush();
+              vars.removeIf(v -> {
+                PsiModifierListOwner variable = v.getPsiVariable();
+                return variable instanceof PsiField && ((PsiField)variable).getContainingClass() == containingClass;
+              });
+            }
             if (currentBlock == body &&
                 (isCallExposingNonInitializedFields(instruction) ||
-                instruction instanceof ReturnInstruction && !((ReturnInstruction)instruction).isViaException())) {
+                 instruction instanceof ReturnInstruction && !((ReturnInstruction)instruction).isViaException())) {
               for (PsiField field : containingClass.getFields()) {
                 if (!instructionState.getMemoryState().isNotNull(getFactory().getVarFactory().createVariableValue(field))) {
                   map.put(field, false);
-                } else if (!map.containsKey(field)) {
+                }
+                else if (!map.containsKey(field)) {
                   map.put(field, true);
                 }
               }
@@ -371,7 +402,7 @@ public final class DfaPsiUtil {
             }
           }
         }
-        return Result.create(notNullFields, constructor, PsiModificationTracker.MODIFICATION_COUNT);
+        return Result.create(notNullFields, body, PsiModificationTracker.MODIFICATION_COUNT);
       }
     });
   }
@@ -392,7 +423,7 @@ public final class DfaPsiUtil {
       return MultiMap.empty();
     }
 
-    return CachedValuesManager.getCachedValue(psiClass, new CachedValueProvider<MultiMap<PsiField, PsiExpression>>() {
+    return CachedValuesManager.getCachedValue(psiClass, new CachedValueProvider<>() {
       @NotNull
       @Override
       public Result<MultiMap<PsiField, PsiExpression>> compute() {
@@ -424,6 +455,12 @@ public final class DfaPsiUtil {
             constructor.accept(visitor);
           }
         }
+ 
+        for (PsiClassInitializer initializer : psiClass.getInitializers()) {
+          if (initializer.getLanguage().isKindOf(JavaLanguage.INSTANCE)) {
+            initializer.accept(visitor);
+          }
+        } 
 
         return Result.create(result, psiClass);
       }

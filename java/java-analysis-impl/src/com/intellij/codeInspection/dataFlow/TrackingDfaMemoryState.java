@@ -5,6 +5,7 @@ import com.intellij.codeInspection.dataFlow.instructions.AssignInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.ConditionalGotoInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.ExpressionPushingInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.Instruction;
+import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeBinOp;
 import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
 import com.intellij.codeInspection.dataFlow.types.*;
 import com.intellij.codeInspection.dataFlow.value.*;
@@ -47,7 +48,8 @@ public class TrackingDfaMemoryState extends DfaMemoryStateImpl {
   protected void afterMerge(DfaMemoryStateImpl other) {
     super.afterMerge(other);
     assert other instanceof TrackingDfaMemoryState;
-    myHistory = myHistory.merge(((TrackingDfaMemoryState)other).myHistory);
+    MemoryStateChange otherHistory = ((TrackingDfaMemoryState)other).myHistory;
+    myHistory = myHistory == null ? otherHistory : myHistory.merge(otherHistory);
   }
 
   private Map<DfaVariableValue, Set<Relation>> getRelations() {
@@ -351,8 +353,9 @@ public class TrackingDfaMemoryState extends DfaMemoryStateImpl {
         FactDefinition<T> left = findFact(((DfaBinOpValue)value).getLeft(), extractor);
         FactDefinition<T> right = findFact(((DfaBinOpValue)value).getRight(), extractor);
         if (left.myFact instanceof LongRangeSet && right.myFact instanceof LongRangeSet) {
-          @SuppressWarnings("unchecked") T result = (T)((LongRangeSet)left.myFact).binOpFromToken(
-            ((DfaBinOpValue)value).getTokenType(), ((LongRangeSet)right.myFact), PsiType.LONG.equals(value.getType()));
+          LongRangeBinOp op = ((DfaBinOpValue)value).getOperation();
+          @SuppressWarnings("unchecked") 
+          T result = (T)op.eval((LongRangeSet)left.myFact, (LongRangeSet)right.myFact, PsiType.LONG.equals(value.getType()));
           return new FactDefinition<>(null, Objects.requireNonNull(result));
         }
       }

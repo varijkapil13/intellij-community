@@ -17,6 +17,7 @@ import com.intellij.ui.ComboboxSpeedSearch;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,7 +32,7 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
 
   private final Item[] myOptionItems;
   private boolean myPreventPopupClosing;
-  private @Nullable String myNoModule;
+  private @Nullable @Nls String myNoModule;
   private static final Item mySeparator = new Item((String)null);
 
   public static class Item {
@@ -51,6 +52,7 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
   public ModuleClasspathCombo(Item... optionItems) {
     myOptionItems = optionItems;
     setRenderer(new ListRenderer());
+    setSwingPopup(false);
     ComboboxSpeedSearch.installSpeedSearch(this, item -> item.myModule == null ? "" : item.myModule.getName());
   }
 
@@ -63,12 +65,12 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
   }
 
   private void buildModel(@NotNull Collection<? extends Module> modules) {
-    List<@NotNull Item> items = ContainerUtil.map(modules, module -> new Item(module));
+    List<@NotNull Item> items = ContainerUtil.map(modules, Item::new);
     items.sort(Comparator.comparing(o -> o.myModule.getName()));
     CollectionComboBoxModel<Item> model = new ModelWithOptions();
     model.add(items);
     if (myNoModule != null) {
-      model.add(new Item((Module)null));
+      model.add((Item)null);
     }
     if (myOptionItems.length > 0) {
       model.add(mySeparator);
@@ -83,7 +85,7 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
 
   public void reset(ModuleBasedConfiguration<?,?> configuration) {
     Module[] all = ModuleManager.getInstance(configuration.getProject()).getModules();
-    buildModel(ContainerUtil.filter(all, module -> isModuleAccepted(module)));
+    buildModel(ContainerUtil.filter(all, ModuleClasspathCombo::isModuleAccepted));
     setSelectedModule(configuration.getConfigurationModule().getModule());
   }
 
@@ -101,16 +103,16 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
   @Override
   public void setSelectedModule(Module module) {
     List<Item> items = ((CollectionComboBoxModel<Item>)super.getModel()).getItems();
-    setSelectedItem(ContainerUtil.find(items, item -> module == item.myModule));
+    setSelectedItem(ContainerUtil.find(items, item -> item != null && module == item.myModule));
   }
 
   @Override
-  public void setModules(Collection<? extends Module> modules) {
+  public void setModules(@NotNull Collection<? extends Module> modules) {
     buildModel(modules);
   }
 
   @Override
-  public void allowEmptySelection(String noModuleText) {
+  public void allowEmptySelection(@NotNull String noModuleText) {
     myNoModule = noModuleText;
   }
 
@@ -121,7 +123,7 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
   }
 
   @Override
-  public void setSelectedModule(Project project, String name) {
+  public void setSelectedModule(@NotNull Project project, @NotNull String name) {
     List<Item> items = ((CollectionComboBoxModel<Item>)super.getModel()).getItems();
     Item selectedItem = ContainerUtil.find(items, item -> item.myModule != null && item.myModule.getName().equals(name));
     setSelectedItem(selectedItem);
@@ -172,8 +174,9 @@ public class ModuleClasspathCombo extends ComboBox<ModuleClasspathCombo.Item> im
 
     @Override
     protected void customizeCellRenderer(@NotNull JList<? extends Item> list, Item value, int index, boolean selected, boolean hasFocus) {
-      String name = value == null ? null : value.myModule == null ? myNoModule : value.myModule.getName();
+      String name = value == null || value.myModule == null ? myNoModule : value.myModule.getName();
       if (index == -1 && name != null) {
+        //noinspection HardCodedStringLiteral
         append("-cp ", SimpleTextAttributes.GRAYED_ATTRIBUTES);
       }
       append(StringUtil.notNullize(name));

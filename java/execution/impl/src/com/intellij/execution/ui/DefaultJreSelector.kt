@@ -4,8 +4,10 @@ package com.intellij.execution.ui
 
 import com.intellij.application.options.ModuleDescriptionsComboBox
 import com.intellij.application.options.ModulesComboBox
+import com.intellij.execution.ExecutionBundle
 import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.util.JavaParametersUtil
+import com.intellij.java.JavaBundle
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.module.Module
@@ -18,6 +20,7 @@ import com.intellij.openapi.util.component1
 import com.intellij.openapi.util.component2
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.EditorTextFieldWithBrowseButton
+import org.jetbrains.annotations.Nls
 
 abstract class DefaultJreSelector {
   companion object {
@@ -54,9 +57,10 @@ abstract class DefaultJreSelector {
   open fun addChangeListener(listener: Runnable) {
   }
 
+  @Nls
   fun getDescriptionString(): String {
     val (name, description) = getNameAndDescription()
-    return " (${name ?: "<no JRE>"} - $description)"
+    return " (${name ?: JavaBundle.message("no.jre.description")} - $description)"
   }
 
 
@@ -67,18 +71,19 @@ abstract class DefaultJreSelector {
 
   open class SdkFromModuleDependencies<T: ComboBox<*>>(val moduleComboBox: T, val getSelectedModule: (T) -> Module?, val productionOnly: () -> Boolean): DefaultJreSelector() {
     override fun getNameAndDescription(): Pair<String?, String> {
-      val module = getSelectedModule(moduleComboBox) ?: return Pair.create(null, "module not specified")
+      val moduleNotSpecified = ExecutionBundle.message("module.not.specified")
+      val module = getSelectedModule(moduleComboBox) ?: return Pair.create(null, moduleNotSpecified)
 
       val productionOnly = productionOnly()
       val jdkToRun = JavaParameters.getJdkToRunModule(module, productionOnly)
       val moduleJdk = ModuleRootManager.getInstance(module).sdk
       if (moduleJdk == null || jdkToRun == null) {
-        return Pair.create(null, "module not specified")
+        return Pair.create(null, moduleNotSpecified)
       }
       if (moduleJdk.homeDirectory == jdkToRun.homeDirectory) {
-        return Pair.create(moduleJdk.name, "SDK of '${module.name}' module")
+        return Pair.create(moduleJdk.name, ExecutionBundle.message("sdk.of.0.module", module.name))
       }
-      return Pair.create(jdkToRun.name, "newest SDK from '${module.name}' module${if (productionOnly) "" else " test"} dependencies")
+      return Pair.create(jdkToRun.name, ExecutionBundle.message("newest.sdk.from.0.module.1.choice.0.1.test.dependencies", module.name, if (productionOnly) 0 else 1))
     }
 
     override fun getVersion(): String? {

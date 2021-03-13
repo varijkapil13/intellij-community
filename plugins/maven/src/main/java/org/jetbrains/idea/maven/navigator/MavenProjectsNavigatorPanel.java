@@ -45,7 +45,7 @@ public class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel implement
   private final Project myProject;
   private final SimpleTree myTree;
 
-  private final Comparator<String> myGoalOrderComparator = new Comparator<String>() {
+  private final Comparator<String> myGoalOrderComparator = new Comparator<>() {
 
     private Map<String, Integer> standardGoalOrder;
 
@@ -66,6 +66,10 @@ public class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel implement
       return order != null ? order.intValue() : standardGoalOrder.size();
     }
   };
+
+  SimpleTree getTree() {
+    return myTree;
+  }
 
   public MavenProjectsNavigatorPanel(Project project, SimpleTree tree) {
     super(true, true);
@@ -174,7 +178,7 @@ public class MavenProjectsNavigatorPanel extends SimpleToolWindowPanel implement
       Navigatable navigatable = each.getNavigatable();
       if (navigatable != null) navigatables.add(navigatable);
     }
-    return navigatables.isEmpty() ? null : navigatables.toArray(new Navigatable[0]);
+    return navigatables.isEmpty() ? null : navigatables.toArray(Navigatable.EMPTY_NAVIGATABLE_ARRAY);
   }
 
   private Object extractLocation() {

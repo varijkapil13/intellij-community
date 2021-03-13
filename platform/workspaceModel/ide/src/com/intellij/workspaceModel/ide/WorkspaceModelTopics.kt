@@ -4,13 +4,13 @@ package com.intellij.workspaceModel.ide
 import com.intellij.diagnostic.StartUpMeasurer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.ServiceManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.messages.MessageBus
 import com.intellij.util.messages.MessageBusConnection
 import com.intellij.util.messages.Topic
-import com.intellij.workspaceModel.ide.impl.moduleLoadingActivity
+import com.intellij.workspaceModel.ide.impl.finishModuleLoadingActivity
 import com.intellij.workspaceModel.storage.VersionedStorageChange
 import java.util.*
 
@@ -27,17 +27,20 @@ interface WorkspaceModelChangeListener : EventListener {
 class WorkspaceModelTopics : Disposable {
   companion object {
     /** Please use [subscribeImmediately] and [subscribeAfterModuleLoading] to subscribe to changes */
-    private val CHANGED = Topic("Workspace Model Changed", WorkspaceModelChangeListener::class.java)
+    @Topic.ProjectLevel
+    private val CHANGED = Topic(WorkspaceModelChangeListener::class.java, Topic.BroadcastDirection.NONE)
 
-    fun getInstance(project: Project): WorkspaceModelTopics = ServiceManager.getService(project, WorkspaceModelTopics::class.java)
+    fun getInstance(project: Project): WorkspaceModelTopics = project.service()
   }
 
   private val allEvents = ContainerUtil.createConcurrentList<EventsDispatcher>()
   private var sendToQueue = true
-  internal var modulesAreLoaded = false
+  var modulesAreLoaded = false
 
   /**
-   * Subscribe to topic and start to receive changes immediately
+   * Subscribe to topic and start to receive changes immediately.
+   *
+   * Topic is project-level only without broadcasting - connection expected to be to project message bus only.
    */
   fun subscribeImmediately(connection: MessageBusConnection, listener: WorkspaceModelChangeListener) {
     connection.subscribe(CHANGED, listener)
@@ -48,21 +51,23 @@ class WorkspaceModelTopics : Disposable {
    * All the events that will be fired before the modules loading, will be collected to the queue. After the modules are loaded, all events
    *   from the queue will be dispatched to listener under the write action and the further events will be dispatched to listener
    *   without passing to event queue.
+   *
+   * Topic is project-level only without broadcasting - connection expected to be to project message bus only.
    */
   fun subscribeAfterModuleLoading(connection: MessageBusConnection, listener: WorkspaceModelChangeListener) {
     if (!sendToQueue) {
-      connection.subscribe(CHANGED, listener)
+      subscribeImmediately(connection, listener)
     }
     else {
       val queue = EventsDispatcher(listener)
       allEvents += queue
-      connection.subscribe(CHANGED, queue)
+      subscribeImmediately(connection, queue)
     }
   }
 
   fun syncPublisher(messageBus: MessageBus): WorkspaceModelChangeListener = messageBus.syncPublisher(CHANGED)
 
-  internal fun notifyModulesAreLoaded() {
+  fun notifyModulesAreLoaded() {
     val activity = StartUpMeasurer.startActivity("(wm) After modules are loaded")
     sendToQueue = false
     val application = ApplicationManager.getApplication()
@@ -70,6 +75,7 @@ class WorkspaceModelTopics : Disposable {
       application.runWriteAction {
         val innerActivity = activity.startChild("(wm) WriteAction. After modules are loaded")
         allEvents.forEach { queue ->
+          queue.collectToQueue = false
           queue.events.forEach { (isBefore, event) ->
             if (isBefore) queue.originalListener.beforeChanged(event)
             else queue.originalListener.changed(event)
@@ -79,17 +85,15 @@ class WorkspaceModelTopics : Disposable {
         innerActivity.end()
       }
     }
-    allEvents.forEach { it.collectToQueue = false }
     allEvents.clear()
     modulesAreLoaded = true
     activity.end()
-    moduleLoadingActivity.end()
+    finishModuleLoadingActivity()
   }
 
   private class EventsDispatcher(val originalListener: WorkspaceModelChangeListener) : WorkspaceModelChangeListener {
-
-    internal val events = mutableListOf<Pair<Boolean, VersionedStorageChange>>()
-    internal var collectToQueue = true
+    val events = mutableListOf<Pair<Boolean, VersionedStorageChange>>()
+    var collectToQueue = true
 
     override fun beforeChanged(event: VersionedStorageChange) {
       if (collectToQueue) {

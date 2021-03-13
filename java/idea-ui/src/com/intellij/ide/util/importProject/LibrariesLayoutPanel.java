@@ -2,6 +2,7 @@
 package com.intellij.ide.util.importProject;
 
 import com.intellij.ide.JavaUiBundle;
+import com.intellij.openapi.util.NlsContexts;
 
 import java.io.File;
 import java.util.Collection;
@@ -70,13 +71,18 @@ public class LibrariesLayoutPanel extends ProjectLayoutPanel<LibraryDescriptor>{
   }
 
   @Override
-  protected String getDependenciesTitle() {
+  protected @NlsContexts.BorderTitle String getDependenciesTitle() {
     return JavaUiBundle.message("title.library.contents");
   }
 
   @Override
-  protected String getElementTypeName() {
-    return "library";
+  protected String getElementTypeNamePlural() {
+    return JavaUiBundle.message("title.libraries");
+  }
+
+  @Override
+  protected ElementType getElementType() {
+    return ElementType.LIBRARY;
   }
 
   @Override

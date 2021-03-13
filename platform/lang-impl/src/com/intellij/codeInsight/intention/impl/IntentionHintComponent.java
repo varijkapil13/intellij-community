@@ -30,6 +30,7 @@ import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.*;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
@@ -47,7 +48,6 @@ import com.intellij.ui.popup.list.ListPopupImpl;
 import com.intellij.util.Alarm;
 import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.ui.EmptyIcon;
 import kotlin.Unit;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -81,7 +81,7 @@ public final class IntentionHintComponent implements Disposable, ScrollAwareHint
     void close();
   }
 
-  static class IntentionPopup implements Popup {
+  static class IntentionPopup implements Popup, Disposable.Parent {
     private final CachedIntentions myCachedIntentions;
     private final Editor myEditor;
     private final PsiFile myFile;
@@ -147,9 +147,15 @@ public final class IntentionHintComponent implements Disposable, ScrollAwareHint
       }
     }
 
+
+    @Override
+    public void beforeTreeDispose() {
+      // The flag has to be set early. Child's dispose() can call `cancelled` and it must be a no-op at this point.
+      myDisposed = true;
+    }
+
     @Override
     public void dispose() {
-      myDisposed = true;
       if (myOuterComboboxPopupListener != null) {
         JComboBox<?> ancestor = findAncestorCombo(myEditor);
         if (ancestor != null) {
@@ -163,7 +169,7 @@ public final class IntentionHintComponent implements Disposable, ScrollAwareHint
 
   private static final Logger LOG = Logger.getInstance(IntentionHintComponent.class);
 
-  private static final Icon ourInactiveArrowIcon = EmptyIcon.create(AllIcons.General.ArrowDown);
+  private static final Icon ourInactiveArrowIcon = IconManager.getInstance().createEmptyIcon(AllIcons.General.ArrowDown);
 
   private static final int NORMAL_BORDER_SIZE = 6;
   private static final int SMALL_BORDER_SIZE = 4;
@@ -588,7 +594,7 @@ public final class IntentionHintComponent implements Disposable, ScrollAwareHint
 
   private static void updatePreviewPopup(@NotNull IntentionHintComponent.IntentionPopup that, @NotNull IntentionAction action, int index) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    that.myPreviewPopupUpdateProcessor.setup(text -> {
+    that.myPreviewPopupUpdateProcessor.setup((@NlsContexts.PopupAdvertisement var text) -> {
       ApplicationManager.getApplication().assertIsDispatchThread();
       that.myPopup.setAdText(text, SwingConstants.LEFT);
       return Unit.INSTANCE;

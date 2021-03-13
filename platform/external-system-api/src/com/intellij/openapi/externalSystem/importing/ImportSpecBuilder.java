@@ -1,7 +1,7 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.externalSystem.importing;
 
-import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.project.ProjectData;
@@ -21,7 +21,6 @@ public class ImportSpecBuilder {
   @NotNull private final Project myProject;
   @NotNull private final ProjectSystemId myExternalSystemId;
   @NotNull private ProgressExecutionMode myProgressExecutionMode;
-  private boolean myForceWhenUptodate;
   @Nullable private ExternalProjectRefreshCallback myCallback;
   private boolean isPreviewMode;
   private boolean isReportRefreshError = true;
@@ -41,26 +40,25 @@ public class ImportSpecBuilder {
     apply(importSpec);
   }
 
-  /**
-   * @deprecated see {@link com.intellij.openapi.externalSystem.settings.ExternalProjectSettings#setUseAutoImport} for details
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  public ImportSpecBuilder whenAutoImportEnabled() {
-    return this;
-  }
-
   public ImportSpecBuilder use(@NotNull ProgressExecutionMode executionMode) {
     myProgressExecutionMode = executionMode;
     return this;
   }
 
+  /**
+   * @deprecated see {@link ImportSpecBuilder#forceWhenUptodate(boolean)}
+   */
+  @Deprecated
   public ImportSpecBuilder forceWhenUptodate() {
     return forceWhenUptodate(true);
   }
 
+  /**
+   * @deprecated it does nothing from
+   * 16.02.2017, 16:42, ebef09cdbbd6ace3c79d3e4fb63028bac2f15f75
+   */
+  @Deprecated
   public ImportSpecBuilder forceWhenUptodate(boolean force) {
-    myForceWhenUptodate = force;
     return this;
   }
 
@@ -100,20 +98,9 @@ public class ImportSpecBuilder {
     return this;
   }
 
-  /**
-   * @deprecated no need to call the method, default callback is used by default
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public ImportSpecBuilder useDefaultCallback() {
-    callback(null);
-    return this;
-  }
-
   public ImportSpec build() {
     ImportSpecImpl mySpec = new ImportSpecImpl(myProject, myExternalSystemId);
     mySpec.setProgressExecutionMode(myProgressExecutionMode);
-    mySpec.setForceWhenUptodate(myForceWhenUptodate);
     mySpec.setCreateDirectoriesForEmptyContentRoots(myCreateDirectoriesForEmptyContentRoots);
     mySpec.setPreviewMode(isPreviewMode);
     mySpec.setReportRefreshError(isReportRefreshError);
@@ -136,7 +123,6 @@ public class ImportSpecBuilder {
 
   private void apply(ImportSpec spec) {
     myProgressExecutionMode = spec.getProgressExecutionMode();
-    myForceWhenUptodate = spec.isForceWhenUptodate();
     myCreateDirectoriesForEmptyContentRoots = spec.shouldCreateDirectoriesForEmptyContentRoots();
     myCallback = spec.getCallback();
     isPreviewMode = spec.isPreviewMode();
@@ -161,7 +147,7 @@ public class ImportSpecBuilder {
         return;
       }
       final boolean synchronous = myExecutionMode == ProgressExecutionMode.MODAL_SYNC;
-      ServiceManager.getService(ProjectDataManager.class).importData(externalProject, myProject, synchronous);
+      ApplicationManager.getApplication().getService(ProjectDataManager.class).importData(externalProject, myProject, synchronous);
     }
   }
 }

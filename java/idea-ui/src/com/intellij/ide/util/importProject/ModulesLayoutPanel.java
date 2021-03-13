@@ -2,6 +2,7 @@
 package com.intellij.ide.util.importProject;
 
 import com.intellij.ide.JavaUiBundle;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
@@ -84,13 +85,18 @@ public class ModulesLayoutPanel extends ProjectLayoutPanel<ModuleDescriptor>{
   }
 
   @Override
-  protected String getDependenciesTitle() {
+  protected @Nls(capitalization = Nls.Capitalization.Title) String getDependenciesTitle() {
     return JavaUiBundle.message("title.module.dependencies");
   }
 
   @Override
-  protected String getElementTypeName() {
-    return "module";
+  protected String getElementTypeNamePlural() {
+    return JavaUiBundle.message("title.modules");
+  }
+
+  @Override
+  protected ElementType getElementType() {
+    return ElementType.MODULE;
   }
 
   @Override

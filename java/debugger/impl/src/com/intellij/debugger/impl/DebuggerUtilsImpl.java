@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.impl;
 
 import com.intellij.configurationStore.XmlSerializer;
@@ -15,6 +15,7 @@ import com.intellij.debugger.ui.tree.render.BatchEvaluator;
 import com.intellij.debugger.ui.tree.render.NodeRenderer;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.RemoteConnection;
+import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.util.TreeClassChooser;
 import com.intellij.ide.util.TreeClassChooserFactory;
@@ -26,10 +27,13 @@ import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiJavaParserFacadeImpl;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.rt.execution.CommandLineWrapper;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
 import com.intellij.util.io.URLUtil;
 import com.intellij.util.net.NetUtils;
@@ -212,6 +216,13 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
     return Boolean.TRUE.equals(debugProcess.getUserData(BatchEvaluator.REMOTE_SESSION_KEY));
   }
 
+  public static void logError(Throwable e) {
+    if (e instanceof VMDisconnectedException) {
+      throw (VMDisconnectedException)e;
+    }
+    LOG.error(e);
+  }
+
   public static <T, E extends Exception> T suppressExceptions(ThrowableComputable<? extends T, ? extends E> supplier, T defaultValue) throws E {
     return suppressExceptions(supplier, defaultValue, true, null);
   }
@@ -241,7 +252,16 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
     return defaultValue;
   }
 
-  public static String getConnectionDisplayName(RemoteConnection connection) {
+  public static @NlsContexts.Label String getConnectionWaitStatus(@NotNull RemoteConnection connection) {
+    String connectionName = ObjectUtils.doIfNotNull(connection, DebuggerUtilsImpl::getConnectionDisplayName);
+    return connection instanceof RemoteConnectionStub
+           ? JavaDebuggerBundle.message("status.waiting.attach")
+           : connection.isServerMode()
+             ? JavaDebuggerBundle.message("status.listening", connectionName)
+             : JavaDebuggerBundle.message("status.connecting", connectionName);
+  }
+
+  public static String getConnectionDisplayName(@NotNull RemoteConnection connection) {
     if (connection instanceof PidRemoteConnection) {
       return "pid " + ((PidRemoteConnection)connection).getPid();
     }
@@ -256,6 +276,10 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
     }
     if (superType.equals(type) || CommonClassNames.JAVA_LANG_OBJECT.equals(superType.name())) {
       return true;
+    }
+    if (type instanceof ArrayType) {
+      String superName = superType.name();
+      return CommonClassNames.JAVA_LANG_CLONEABLE.equals(superName) || CommonClassNames.JAVA_IO_SERIALIZABLE.equals(superName);
     }
     return supertypes(type).anyMatch(t -> instanceOf(t, superType));
   }
@@ -290,6 +314,25 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
   @Override
   protected Location getLocation(SuspendContext context) {
     return ((SuspendContextImpl)context).getLocation();
+  }
+
+  // compilable version of array class for compiling evaluator
+  private static final String ARRAY_CLASS_NAME = "__Dummy_Array__";
+  private static final String ARRAY_CLASS_TEXT =
+    "public class " + ARRAY_CLASS_NAME + "<T> {" +
+    "  public final int length;" +
+    "  private " + ARRAY_CLASS_NAME + "(int l) {length = l;}" +
+    "  public T[] clone() {return null;}" +
+    "}";
+
+  @Override
+  protected PsiClass createArrayClass(Project project, LanguageLevel level) {
+    PsiFile psiFile =
+      PsiFileFactory.getInstance(project).createFileFromText(ARRAY_CLASS_NAME + "." + JavaFileType.INSTANCE.getDefaultExtension(),
+                                                             JavaFileType.INSTANCE.getLanguage(),
+                                                             ARRAY_CLASS_TEXT);
+    PsiUtil.FILE_LANGUAGE_LEVEL_KEY.set(psiFile, level);
+    return ((PsiJavaFile)psiFile).getClasses()[0];
   }
 
   @NotNull

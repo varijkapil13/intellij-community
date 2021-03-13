@@ -9,7 +9,6 @@ import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.NullableFunction;
-import com.intellij.util.text.StringFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -74,7 +73,7 @@ public abstract class CommonSourceRootDetectionUtil<F> {
 
   protected abstract boolean isFile(final F file);
 
-  public static final CommonSourceRootDetectionUtil<File> IO_FILE = new CommonSourceRootDetectionUtil<File>() {
+  public static final CommonSourceRootDetectionUtil<File> IO_FILE = new CommonSourceRootDetectionUtil<>() {
 
     @Override
     protected String getName(final File file) {
@@ -98,7 +97,7 @@ public abstract class CommonSourceRootDetectionUtil<F> {
 
     @Override
     protected CharSequence loadText(final File file) throws IOException {
-      return StringFactory.createShared(loadFileTextSkippingBom(file));
+      return loadFileTextSkippingBom(file);
     }
 
     @Override
@@ -107,14 +106,15 @@ public abstract class CommonSourceRootDetectionUtil<F> {
     }
   };
 
-  private static char[] loadFileTextSkippingBom(File file) throws IOException {
+  @NotNull
+  private static String loadFileTextSkippingBom(File file) throws IOException {
     try (InputStream stream = CharsetToolkit.inputStreamSkippingBOM(new BufferedInputStream(new FileInputStream(file)));
          Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
-      return FileUtilRt.loadText(reader, (int)file.length());
+      return new String(FileUtilRt.loadText(reader, (int)file.length()));
     }
   }
 
-  public static final CommonSourceRootDetectionUtil<VirtualFile> VIRTUAL_FILE = new CommonSourceRootDetectionUtil<VirtualFile>() {
+  public static final CommonSourceRootDetectionUtil<VirtualFile> VIRTUAL_FILE = new CommonSourceRootDetectionUtil<>() {
 
     @Override
     protected String getName(VirtualFile file) {

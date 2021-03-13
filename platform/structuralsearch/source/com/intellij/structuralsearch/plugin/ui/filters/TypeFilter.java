@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
 import com.intellij.openapi.editor.Document;
@@ -8,7 +8,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.structuralsearch.MatchVariableConstraint;
 import com.intellij.structuralsearch.SSRBundle;
-import com.intellij.structuralsearch.StructuralSearchProfile;
 import com.intellij.structuralsearch.plugin.ui.UIUtil;
 import com.intellij.ui.ContextHelpLabel;
 import com.intellij.ui.EditorTextField;
@@ -53,9 +52,8 @@ public class TypeFilter extends FilterAction {
     if (myTable.getMatchVariable() == null) {
       return false;
     }
-    final StructuralSearchProfile profile = myTable.getProfile();
-    myShowRegex = profile.isApplicableConstraint(UIUtil.TYPE_REGEX, nodes, completePattern, target);
-    return profile.isApplicableConstraint(UIUtil.TYPE, nodes, completePattern, target);
+    myShowRegex = isApplicableConstraint(UIUtil.TYPE_REGEX, nodes, completePattern, target);
+    return isApplicableConstraint(UIUtil.TYPE, nodes, completePattern, target);
   }
 
   @Override
@@ -74,12 +72,13 @@ public class TypeFilter extends FilterAction {
 
   @Override
   public FilterEditor<MatchVariableConstraint> getEditor() {
-    return new FilterEditor<MatchVariableConstraint>(myTable.getMatchVariable(), myTable.getConstraintChangedCallback()) {
+    return new FilterEditor<>(myTable.getMatchVariable(), myTable.getConstraintChangedCallback()) {
 
       private final EditorTextField myTextField = UIUtil.createTextComponent("", myTable.getProject());
       private final JLabel myTypeLabel = new JLabel(SSRBundle.message("type.label"));
       private final JCheckBox myHierarchyCheckBox = new JCheckBox(SSRBundle.message("within.type.hierarchy.check.box"), false);
       private final JCheckBox myRegexCheckBox = new JCheckBox(SSRBundle.message("regex.check.box"), false);
+
       {
         myRegexCheckBox.addActionListener(e -> {
           final FileType fileType = myRegexCheckBox.isSelected() ? RegExpFileType.INSTANCE : PlainTextFileType.INSTANCE;
@@ -87,6 +86,7 @@ public class TypeFilter extends FilterAction {
           myTextField.setDocument(document);
         });
       }
+
       private final ContextHelpLabel myHelpLabel = ContextHelpLabel.create(SSRBundle.message("type.filter.help.text"));
 
       @Override
@@ -132,7 +132,7 @@ public class TypeFilter extends FilterAction {
         final boolean regex = myConstraint.isRegexExprType();
         myTextField.setFileType(myShowRegex && regex ? RegExpFileType.INSTANCE : PlainTextFileType.INSTANCE);
         myTextField.setText((myConstraint.isInvertExprType() ? "!" : "") +
-                            (regex ? myConstraint.getNameOfExprType() : myConstraint.getExpressionTypes()))  ;
+                            (regex ? myConstraint.getNameOfExprType() : myConstraint.getExpressionTypes()));
         myHierarchyCheckBox.setSelected(myConstraint.isExprTypeWithinHierarchy());
         myRegexCheckBox.setSelected(myShowRegex && regex);
         myRegexCheckBox.setVisible(myShowRegex);

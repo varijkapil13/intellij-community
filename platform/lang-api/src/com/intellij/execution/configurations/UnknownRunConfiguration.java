@@ -8,12 +8,13 @@ import com.intellij.execution.RunManager;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.ide.plugins.PluginFeatureService;
 import com.intellij.ide.plugins.PluginManagerConfigurableService;
+import com.intellij.ide.plugins.advertiser.FeaturePluginData;
 import com.intellij.lang.LangBundle;
-import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.JDOMUtil;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Attribute;
@@ -31,7 +32,7 @@ public final class UnknownRunConfiguration implements RunConfiguration, WithoutO
   private final ConfigurationFactory myFactory;
   private Element myStoredElement;
   private String myName;
-  private final Project myProject;
+  private final @NotNull Project myProject;
 
   private static final AtomicInteger myUniqueName = new AtomicInteger(1);
   private boolean myDoNotStore;
@@ -72,7 +73,7 @@ public final class UnknownRunConfiguration implements RunConfiguration, WithoutO
   }
 
   @Override
-  public Project getProject() {
+  public @NotNull Project getProject() {
     return myProject;
   }
 
@@ -88,8 +89,8 @@ public final class UnknownRunConfiguration implements RunConfiguration, WithoutO
 
   @Override
   public RunProfileState getState(@NotNull final Executor executor, @NotNull final ExecutionEnvironment env) throws ExecutionException {
-    String factoryName = getConfigurationTypeId();
-    throw new ExecutionException("Unknown run configuration type" + (StringUtil.isEmpty(factoryName) ? "" : " " + factoryName));
+    @NlsSafe String factoryName = getConfigurationTypeId();
+    throw new ExecutionException(ExecutionBundle.message("dialog.message.unknown.run.configuration.type", factoryName, StringUtil.isEmpty(factoryName) ? 0 : 1));
   }
 
   @NotNull
@@ -113,13 +114,14 @@ public final class UnknownRunConfiguration implements RunConfiguration, WithoutO
   public void checkConfiguration() throws RuntimeConfigurationException {
     String typeId = getConfigurationTypeId();
     if (typeId != null) {
-      PluginFeatureService.FeaturePluginData plugin =
-        PluginFeatureService.getInstance().getPluginForFeature(RunManager.CONFIGURATION_TYPE_FEATURE_ID, typeId);
+      FeaturePluginData plugin = PluginFeatureService.getInstance().getPluginForFeature(RunManager.CONFIGURATION_TYPE_FEATURE_ID,
+                                                                                        typeId);
       if (plugin != null) {
         RuntimeConfigurationError err = new RuntimeConfigurationError(
           LangBundle.message("dialog.message.broken.configuration.missing.plugin", plugin.getDisplayName()));
         err.setQuickFix(() -> {
-          PluginManagerConfigurableService.getInstance().showPluginConfigurableAndEnable(null, PluginId.getId(plugin.getPluginId()));
+          PluginManagerConfigurableService.getInstance().showPluginConfigurableAndEnable(null,
+                                                                                         plugin.getPluginData().getPluginIdString());
         });
         throw err;
       }

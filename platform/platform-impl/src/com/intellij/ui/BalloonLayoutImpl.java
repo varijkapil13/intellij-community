@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui;
 
 import com.intellij.notification.EventLog;
@@ -8,6 +8,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.impl.IdeRootPane;
 import com.intellij.openapi.wm.impl.ToolWindowsPane;
@@ -53,7 +54,7 @@ public class BalloonLayoutImpl implements BalloonLayout, Disposable {
   private final Runnable myCloseAll = () -> {
     for (Balloon balloon : new ArrayList<>(myBalloons)) {
       BalloonLayoutData layoutData = myLayoutData.get(balloon);
-      NotificationCollector.getInstance().logNotificationBalloonClosedByUser(layoutData.id, layoutData.displayId, layoutData.groupId);
+      NotificationCollector.getInstance().logNotificationBalloonClosedByUser(layoutData.project, layoutData.id, layoutData.displayId, layoutData.groupId);
       remove(balloon, true);
     }
   };
@@ -72,6 +73,7 @@ public class BalloonLayoutImpl implements BalloonLayout, Disposable {
     myLayeredPane.addComponentListener(myResizeListener);
   }
 
+  @Override
   public void dispose() {
     myLayeredPane.removeComponentListener(myResizeListener);
     for (Balloon balloon : new ArrayList<>(myBalloons)) {
@@ -286,6 +288,9 @@ public class BalloonLayoutImpl implements BalloonLayout, Disposable {
     ToolWindowsPane pane = UIUtil.findComponentOfType(myParent, ToolWindowsPane.class);
     if (pane != null) {
       y -= pane.getBottomHeight();
+      if (SystemInfoRt.isMac && Registry.is("ide.mac.transparentTitleBarAppearance", false)) {
+        y -= pane.getY();
+      }
     }
     if (myParent instanceof IdeRootPane) {
       y -= ((IdeRootPane)myParent).getStatusBarHeight();

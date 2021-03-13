@@ -1,6 +1,7 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.groovy.dsl;
 
+import com.intellij.ide.impl.TrustedProjects;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -32,6 +33,7 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.io.URLUtil;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.GdslFileType;
@@ -65,6 +67,7 @@ public final class GroovyDslFileIndex {
   private GroovyDslFileIndex() {}
 
   @Nullable
+  @NlsSafe
   public static String getError(VirtualFile file) {
     DslActivationStatus.Entry info = DslActivationStatus.getInstance().getGdslFileInfo(file);
     return info == null ? null : info.error;
@@ -94,14 +97,14 @@ public final class GroovyDslFileIndex {
     }, app.getDisposed());
   }
 
-  static void disableFile(@NotNull VirtualFile vfile, @NotNull Status status, @Nullable String error) {
+  static void disableFile(@NotNull VirtualFile vfile, @NotNull Status status, @NlsSafe @Nullable String error) {
     assert status != Status.ACTIVE;
     setStatusAndError(vfile, status, error);
     vfile.putUserData(CACHED_EXECUTOR, null);
     clearScriptCache();
   }
 
-  private static void setStatusAndError(@NotNull VirtualFile vfile, @NotNull Status status, @Nullable String error) {
+  private static void setStatusAndError(@NotNull VirtualFile vfile, @NotNull Status status, @NlsSafe @Nullable String error) {
     DslActivationStatus.Entry entry = DslActivationStatus.getInstance().getGdslFileInfoOrCreate(vfile);
     entry.status = status;
     entry.error = error;
@@ -134,7 +137,7 @@ public final class GroovyDslFileIndex {
 
       for (Object info : infos) {
         if (info instanceof Map) {
-          final Map map = (Map)info;
+          @NonNls final Map map = (Map)info;
 
           final Object _pattern = map.get("pattern");
           final Object _superClass = map.get("superClass");
@@ -217,9 +220,10 @@ public final class GroovyDslFileIndex {
   }
 
   private static List<VirtualFile> getGdslFiles(final Project project) {
-    final List<VirtualFile> result = new ArrayList<>();
-    result.addAll(bundledGdslFiles.getValue());
-    result.addAll(getProjectGdslFiles(project));
+    final List<VirtualFile> result = new ArrayList<>(bundledGdslFiles.getValue());
+    if (TrustedProjects.isTrusted(project)) {
+      result.addAll(getProjectGdslFiles(project));
+    }
     return result;
   }
 
@@ -249,7 +253,7 @@ public final class GroovyDslFileIndex {
     }, null);
   }
 
-  private static List<VirtualFile> getProjectGdslFiles(Project project) {
+  static List<VirtualFile> getProjectGdslFiles(Project project) {
     final List<VirtualFile> result = new ArrayList<>();
     final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     final GlobalSearchScope scope = GlobalSearchScope.allScope(project);

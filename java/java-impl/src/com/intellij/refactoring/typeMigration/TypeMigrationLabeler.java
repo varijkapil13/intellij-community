@@ -57,7 +57,7 @@ public class TypeMigrationLabeler {
   }
 
   private final TypeMigrationRules myRules;
-  private final Function<PsiElement, PsiType> myMigrationRootTypeFunction;
+  private final Function<? super PsiElement, ? extends PsiType> myMigrationRootTypeFunction;
   @Nullable private final Set<PsiElement> myAllowedRoots;
   private TypeEvaluator myTypeEvaluator;
   private final LinkedHashMap<PsiElement, Object> myConversions;
@@ -80,7 +80,7 @@ public class TypeMigrationLabeler {
   }
 
   public TypeMigrationLabeler(TypeMigrationRules rules,
-                              Function<PsiElement, PsiType> migrationRootTypeFunction,
+                              Function<? super PsiElement, ? extends PsiType> migrationRootTypeFunction,
                               PsiElement @Nullable("any root accepted if null") [] allowedRoots,
                               Project project) {
     myRules = rules;
@@ -98,7 +98,7 @@ public class TypeMigrationLabeler {
     return !myFailedConversions.isEmpty();
   }
 
-  public Function<PsiElement, PsiType> getMigrationRootTypeFunction() {
+  public Function<? super PsiElement, ? extends PsiType> getMigrationRootTypeFunction() {
     return myMigrationRootTypeFunction;
   }
 
@@ -198,7 +198,7 @@ public class TypeMigrationLabeler {
 
   private TypeMigrationUsageInfo[] sortMigratedUsages(TypeMigrationUsageInfo[] infos) {
     final DFSTBuilder<TypeMigrationUsageInfo> builder = new DFSTBuilder<>(GraphGenerator.generate(
-      new InboundSemiGraph<TypeMigrationUsageInfo>() {
+      new InboundSemiGraph<>() {
         @NotNull
         @Override
         public Collection<TypeMigrationUsageInfo> getNodes() {
@@ -279,7 +279,7 @@ public class TypeMigrationLabeler {
 
   final class MigrationProducer {
     private final Map<UsageInfo, Object> myRemainConversions;
-    private final MultiMap<PsiTypeElement, TypeMigrationUsageInfo> myVariableMigration = new MultiMap<PsiTypeElement, TypeMigrationUsageInfo>();
+    private final MultiMap<PsiTypeElement, TypeMigrationUsageInfo> myVariableMigration = new MultiMap<>();
 
     private MigrationProducer(Map<UsageInfo, Object> conversions) {
       myRemainConversions = conversions;

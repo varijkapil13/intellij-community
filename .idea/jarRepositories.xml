@@ -42,11 +42,6 @@
       <option name="url" value="https://cache-redirector.jetbrains.com/jetbrains.bintray.com/markdown" />
     </remote-repository>
     <remote-repository>
-      <option name="id" value="e585af2a-f558-424b-a8e6-3a1365d5b046" />
-      <option name="name" value="e585af2a-f558-424b-a8e6-3a1365d5b046" />
-      <option name="url" value="https://cache-redirector.jetbrains.com/jetbrains.bintray.com/markdown" />
-    </remote-repository>
-    <remote-repository>
       <option name="id" value="7f849d18-5038-490f-a93d-226871e8f98c" />
       <option name="name" value="7f849d18-5038-490f-a93d-226871e8f98c" />
       <option name="url" value="https://cache-redirector.jetbrains.com/www.myget.org/F/rd-snapshots/maven" />
@@ -57,14 +52,24 @@
       <option name="url" value="https://cache-redirector.jetbrains.com/download.jetbrains.com/teamcity-repository" />
     </remote-repository>
     <remote-repository>
-      <option name="id" value="b7513459-458a-4892-b2b4-eca932d3c82a" />
-      <option name="name" value="b7513459-458a-4892-b2b4-eca932d3c82a" />
-      <option name="url" value="https://cache-redirector.jetbrains.com/kotlin.bintray.com/kotlin-plugin/" />
+      <option name="id" value="JetBrainsSpacePublicMaven" />
+      <option name="name" value="JetBrains Space Public Maven" />
+      <option name="url" value="https://cache-redirector.jetbrains.com/maven.pkg.jetbrains.space/public/p/space/maven" />
     </remote-repository>
     <remote-repository>
-      <option name="id" value="905ce807-c0fe-49c0-822b-33d31d6616e4" />
-      <option name="name" value="905ce807-c0fe-49c0-822b-33d31d6616e4" />
-      <option name="url" value="https://cache-redirector.jetbrains.com/jetbrains.bintray.com/space" />
+      <option name="id" value="caeb020e-2153-45d1-b752-f56d66968d08" />
+      <option name="name" value="caeb020e-2153-45d1-b752-f56d66968d08" />
+      <option name="url" value="https://cache-redirector.jetbrains.com/maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-ide-plugin-dependencies" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="KotlinIdeMavenArtifacts" />
+      <option name="name" value="KotlinIdeMavenArtifacts" />
+      <option name="url" value="https://cache-redirector.jetbrains.com/maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-ide" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="JetBrainsPluginRepository" />
+      <option name="name" value="JetBrains Plugin Repository libraries" />
+      <option name="url" value="https://cache-redirector.jetbrains.com/jetbrains.bintray.com/intellij-plugin-service" />
     </remote-repository>
   </component>
 </project>

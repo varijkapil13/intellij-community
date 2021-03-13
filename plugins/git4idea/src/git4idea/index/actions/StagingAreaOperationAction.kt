@@ -7,14 +7,22 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.MessageType
 import com.intellij.openapi.util.NlsContexts
+import com.intellij.openapi.util.NlsContexts.NotificationContent
 import com.intellij.openapi.util.ThrowableComputable
+import com.intellij.openapi.util.text.HtmlBuilder
+import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.openapi.vcs.VcsException
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier
 import com.intellij.vcsUtil.VcsFileUtil
-import com.intellij.vcsUtil.VcsUtil
-import com.intellij.xml.util.XmlStringUtil
+import git4idea.GitContentRevision
 import git4idea.index.ui.GitFileStatusNode
-import git4idea.index.vfs.GitIndexFileSystemRefresher
+import git4idea.repo.GitRepository
+import git4idea.repo.GitRepositoryManager
+import java.util.*
+
+class GitAddAction : StagingAreaOperationAction(GitAddOperation)
+class GitResetAction : StagingAreaOperationAction(GitResetOperation)
+class GitRevertAction : StagingAreaOperationAction(GitRevertOperation)
 
 abstract class StagingAreaOperationAction(private val operation: StagingAreaOperation)
   : GitFileStatusNodeAction(operation.actionText, Presentation.NULL_STRING, operation.icon) {
@@ -28,14 +36,41 @@ fun performStageOperation(project: Project, nodes: List<GitFileStatusNode>, oper
   FileDocumentManager.getInstance().saveAllDocuments()
 
   runProcess(project, operation.progressTitle, true) {
-    val paths = nodes.map { it.filePath }
+    val repositoryManager = GitRepositoryManager.getInstance(project)
+
+    val submodulesByRoot = mutableMapOf<GitRepository, MutableList<GitFileStatusNode>>()
+    val pathsByRoot = mutableMapOf<GitRepository, MutableList<GitFileStatusNode>>()
+    for (node in nodes) {
+      val filePath = node.filePath
+      val submodule = GitContentRevision.getRepositoryIfSubmodule(project, filePath)
+      if (submodule != null) {
+        val list = submodulesByRoot.computeIfAbsent(submodule.parent) { ArrayList() }
+        list.add(node)
+      }
+      else {
+        val repo = repositoryManager.getRepositoryForFileQuick(filePath)
+        if (repo != null) {
+          val list = pathsByRoot.computeIfAbsent(repo) { ArrayList() }
+          list.add(node)
+        }
+      }
+    }
 
     val exceptions = mutableListOf<VcsException>()
-    VcsUtil.groupByRoots(project, paths) { it }.forEach { (vcsRoot, paths) ->
+    pathsByRoot.forEach { (repo, nodes) ->
       try {
-        operation.processPaths(project, vcsRoot.path, paths)
-        VcsFileUtil.markFilesDirty(project, paths)
-        GitIndexFileSystemRefresher.getInstance(project).refresh { paths.contains(it.filePath) }
+        operation.processPaths(project, repo.root, nodes)
+        VcsFileUtil.markFilesDirty(project, nodes.map { it.filePath })
+      }
+      catch (ex: VcsException) {
+        exceptions.add(ex)
+      }
+    }
+
+    submodulesByRoot.forEach { (repo, submodules) ->
+      try {
+        operation.processPaths(project, repo.root, submodules)
+        VcsFileUtil.markFilesDirty(project, submodules.mapNotNull { it.filePath.parentPath })
       }
       catch (ex: VcsException) {
         exceptions.add(ex)
@@ -49,12 +84,14 @@ fun performStageOperation(project: Project, nodes: List<GitFileStatusNode>, oper
 }
 
 fun <T> runProcess(project: Project, @NlsContexts.ProgressTitle title: String, canBeCancelled: Boolean, process: () -> T): T {
-  return ProgressManager.getInstance().runProcessWithProgressSynchronously<T, Exception>(ThrowableComputable { process() },
-                                                                                         title, canBeCancelled, project)
+  return ProgressManager.getInstance().runProcessWithProgressSynchronously(ThrowableComputable { process() },
+                                                                           title, canBeCancelled, project)
 }
 
-private fun showErrorMessage(project: Project, messageTitle: String, exceptions: Collection<Exception>) {
-  VcsBalloonProblemNotifier.showOverVersionControlView(project, XmlStringUtil.wrapInHtmlTag("$messageTitle:", "b")
-                                                                + "\n" + exceptions.joinToString("\n") { it.localizedMessage },
-                                                       MessageType.ERROR)
+private fun showErrorMessage(project: Project, @NotificationContent messageTitle: String, exceptions: Collection<Exception>) {
+  val message = HtmlBuilder().append(HtmlChunk.text("$messageTitle:").bold())
+    .br()
+    .appendWithSeparators(HtmlChunk.br(), exceptions.map { HtmlChunk.text(it.localizedMessage) })
+
+  VcsBalloonProblemNotifier.showOverVersionControlView(project, message.toString(), MessageType.ERROR)
 }

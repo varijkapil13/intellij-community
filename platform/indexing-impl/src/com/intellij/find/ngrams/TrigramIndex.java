@@ -12,6 +12,7 @@ import com.intellij.util.io.EnumeratorIntegerDescriptor;
 import com.intellij.util.io.KeyDescriptor;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.DataInput;
@@ -29,6 +30,7 @@ public final class TrigramIndex extends ScalarIndexExtension<Integer> implements
    * @deprecated not used anymore, always enabled
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public static final boolean ENABLED = true;
 
   public static final ID<Integer,Void> INDEX_ID = ID.create("Trigram.Index");
@@ -48,7 +50,7 @@ public final class TrigramIndex extends ScalarIndexExtension<Integer> implements
   @NotNull
   @Override
   public DataIndexer<Integer, Void, FileContent> getIndexer() {
-    return new DataIndexer<Integer, Void, FileContent>() {
+    return new DataIndexer<>() {
       @Override
       @NotNull
       public Map<Integer, Void> map(@NotNull FileContent inputData) {
@@ -96,21 +98,21 @@ public final class TrigramIndex extends ScalarIndexExtension<Integer> implements
   @NotNull
   @Override
   public DataExternalizer<Collection<Integer>> createExternalizer() {
-    return new DataExternalizer<Collection<Integer>>() {
+    return new DataExternalizer<>() {
       @Override
       public void save(@NotNull DataOutput out, @NotNull Collection<Integer> value) throws IOException {
         final int numberOfValues = value.size();
 
         int[] buffer = SPARE_BUFFER_LOCAL.getBuffer(numberOfValues);
         int ptr = 0;
-        for(Integer i:value) {
+        for (Integer i : value) {
           buffer[ptr++] = i;
         }
-        Arrays.sort(buffer,0, numberOfValues);
+        Arrays.sort(buffer, 0, numberOfValues);
 
         DataInputOutputUtil.writeINT(out, numberOfValues);
         int prev = 0;
-        for(ptr=0; ptr< numberOfValues; ++ptr) {
+        for (ptr = 0; ptr < numberOfValues; ++ptr) {
           DataInputOutputUtil.writeLONG(out, (long)buffer[ptr] - prev);
           prev = buffer[ptr];
         }

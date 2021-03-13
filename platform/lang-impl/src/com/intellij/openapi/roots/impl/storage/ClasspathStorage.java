@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.roots.impl.storage;
 
 import com.intellij.ProjectTopics;
@@ -75,7 +75,7 @@ public final class ClasspathStorage extends StateStorageBase<Boolean> {
     myPathMacroSubstitutor = storageManager.getMacroSubstitutor();
 
     final List<String> paths = myConverter.getFilePaths();
-    MessageBusConnection busConnection = module.getMessageBus().connect();
+    MessageBusConnection busConnection = module.getProject().getMessageBus().connect(module);
     busConnection.subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
       @Override
       public void after(@NotNull List<? extends VFileEvent> events) {
@@ -101,11 +101,11 @@ public final class ClasspathStorage extends StateStorageBase<Boolean> {
       }
     });
 
-    module.getProject().getMessageBus().connect(module).subscribe(ProjectTopics.MODULES, new ModuleListener() {
+    busConnection.subscribe(ProjectTopics.MODULES, new ModuleListener() {
       @Override
       public void modulesRenamed(@NotNull Project project,
-                                 @NotNull List<Module> modules,
-                                 @NotNull Function<Module, String> oldNameProvider) {
+                                 @NotNull List<? extends Module> modules,
+                                 @NotNull Function<? super Module, String> oldNameProvider) {
         for (Module renamedModule : modules) {
           if (renamedModule.equals(module)) {
             ClasspathStorageProvider provider = getProvider(ClassPathStorageUtil.getStorageType(module));
@@ -194,7 +194,7 @@ public final class ClasspathStorage extends StateStorageBase<Boolean> {
   }
 
   @Override
-  public void analyzeExternalChangesAndUpdateIfNeeded(@NotNull Set<String> componentNames) {
+  public void analyzeExternalChangesAndUpdateIfNeeded(@NotNull Set<? super String> componentNames) {
     // if some file changed, so, changed
     componentNames.add("NewModuleRootManager");
     getStorageDataRef().set(false);
@@ -248,9 +248,12 @@ public final class ClasspathStorage extends StateStorageBase<Boolean> {
       provider.detach(module);
     }
 
-    provider = getProvider(storageId);
-    module.setOption(JpsProjectLoader.CLASSPATH_ATTRIBUTE, provider == null ? null : storageId);
-    module.setOption(JpsProjectLoader.CLASSPATH_DIR_ATTRIBUTE, provider == null ? null : provider.getContentRoot(model));
+    ClasspathStorageProvider newProvider = getProvider(storageId);
+    module.setOption(JpsProjectLoader.CLASSPATH_ATTRIBUTE, newProvider == null ? null : storageId);
+    module.setOption(JpsProjectLoader.CLASSPATH_DIR_ATTRIBUTE, newProvider == null ? null : newProvider.getContentRoot(model));
+    if (newProvider != null) {
+      newProvider.attach(model);
+    }
   }
 
   public static void modulePathChanged(@NotNull Module module) {

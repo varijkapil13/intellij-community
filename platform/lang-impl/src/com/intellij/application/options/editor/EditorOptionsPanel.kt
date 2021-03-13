@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.application.options.editor
 
 import com.intellij.application.options.editor.EditorCaretStopPolicyItem.*
@@ -20,12 +20,14 @@ import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import com.intellij.openapi.editor.richcopy.settings.RichCopySettings
+import com.intellij.openapi.extensions.BaseExtensionPointName
+import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.options.BoundCompositeConfigurable
 import com.intellij.openapi.options.Configurable.WithEpDependencies
-import com.intellij.openapi.options.SchemeManager
+import com.intellij.openapi.options.Scheme
 import com.intellij.openapi.options.UnnamedConfigurable
 import com.intellij.openapi.options.ex.ConfigurableWrapper
 import com.intellij.openapi.project.ProjectManager
@@ -37,6 +39,7 @@ import com.intellij.profile.codeInspection.ui.ErrorOptionsProvider
 import com.intellij.profile.codeInspection.ui.ErrorOptionsProviderEP
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.layout.*
+import org.jetbrains.annotations.Contract
 import javax.swing.DefaultComboBoxModel
 
 // @formatter:off
@@ -47,6 +50,7 @@ private val uiSettings get() = UISettings.instance
 private val richCopySettings get() = RichCopySettings.getInstance()
 private val codeAnalyzerSettings get() = DaemonCodeAnalyzerSettings.getInstance()
 
+@Contract(pure = true)
 private fun String.capitalizeWords(): String = StringUtil.capitalizeWords(this, true)
 
 private val enableWheelFontChange                                      get() = CheckboxDescriptor(if (SystemInfo.isMac) message("checkbox.enable.ctrl.mousewheel.changes.font.size.macos") else message("checkbox.enable.ctrl.mousewheel.changes.font.size"), PropertyBinding(editorSettings::isWheelFontChangeEnabled, editorSettings::setWheelFontChangeEnabled))
@@ -77,21 +81,26 @@ private val cdStripTrailingSpacesEnabled                               get() = C
 // @formatter:on
 
 internal val optionDescriptors: List<OptionDescription>
-  get() = listOf(
-    myCbHonorCamelHumpsWhenSelectingByClicking,
-    enableWheelFontChange,
-    enableDnD,
-    virtualSpace,
-    caretInsideTabs,
-    virtualPageAtBottom,
-    highlightBraces,
-    highlightScope,
-    highlightIdentifierUnderCaret,
-    renameLocalVariablesInplace,
-    preselectCheckBox,
-    showInlineDialogForCheckBox
-  ).map(CheckboxDescriptor::asUiOptionDescriptor)
+  get() {
+    return sequenceOf(
+      myCbHonorCamelHumpsWhenSelectingByClicking,
+      enableWheelFontChange,
+      enableDnD,
+      virtualSpace,
+      caretInsideTabs,
+      virtualPageAtBottom,
+      highlightBraces,
+      highlightScope,
+      highlightIdentifierUnderCaret,
+      renameLocalVariablesInplace,
+      preselectCheckBox,
+      showInlineDialogForCheckBox
+    )
+      .map(CheckboxDescriptor::asUiOptionDescriptor)
+      .toList()
+  }
 
+private val EP_NAME = ExtensionPointName<GeneralEditorOptionsProviderEP>("com.intellij.generalEditorOptionsExtension")
 
 class EditorOptionsPanel : BoundCompositeConfigurable<UnnamedConfigurable>(message("title.editor"), ID), WithEpDependencies {
   companion object {
@@ -115,15 +124,15 @@ class EditorOptionsPanel : BoundCompositeConfigurable<UnnamedConfigurable>(messa
 
     @JvmStatic
     fun restartDaemons() {
-      val projects = ProjectManager.getInstance().openProjects
-      for (project in projects) {
+      for (project in ProjectManager.getInstance().openProjects) {
         DaemonCodeAnalyzer.getInstance(project).settingsChanged()
       }
     }
   }
 
-  override fun createConfigurables() = ConfigurableWrapper.createConfigurables(GeneralEditorOptionsProviderEP.EP_NAME)
-  override fun getDependencies() = setOf(GeneralEditorOptionsProviderEP.EP_NAME)
+  override fun createConfigurables(): List<UnnamedConfigurable> = ConfigurableWrapper.createConfigurables(EP_NAME)
+
+  override fun getDependencies(): Collection<BaseExtensionPointName<*>> = setOf(EP_NAME)
 
   override fun createPanel(): DialogPanel {
     return panel {
@@ -211,7 +220,7 @@ class EditorOptionsPanel : BoundCompositeConfigurable<UnnamedConfigurable>(messa
           cell(isFullWidth = true) {
             label(message("combobox.richcopy.color.scheme"))
             val schemes = listOf(RichCopySettings.ACTIVE_GLOBAL_SCHEME_MARKER) +
-                          EditorColorsManager.getInstance().allSchemes.map { SchemeManager.getBaseName(it) }
+                          EditorColorsManager.getInstance().allSchemes.map { Scheme.getBaseName(it.name) }
             comboBox<String>(
               DefaultComboBoxModel(schemes.toTypedArray()), richCopySettings::getSchemeName, richCopySettings::setSchemeName,
               renderer = SimpleListCellRenderer.create("") {

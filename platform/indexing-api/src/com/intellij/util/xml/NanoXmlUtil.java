@@ -8,8 +8,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.text.CharSequenceReader;
-import com.intellij.util.text.StringFactory;
 import net.n3.nanoxml.*;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -144,6 +144,7 @@ public final class NanoXmlUtil {
    * @deprecated left for API compatibility
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static abstract class IXMLBuilderAdapter implements NanoXmlBuilder {
 
     /**
@@ -174,10 +175,10 @@ public final class NanoXmlUtil {
     }
 
     protected static String readText(final Reader reader) throws IOException {
-      return StringFactory.createShared(StreamUtil.readTextAndConvertSeparators(reader));
+      return new String(StreamUtil.readTextAndConvertSeparators(reader));
     }
 
-    protected String getLocation() {
+    protected @NonNls String getLocation() {
       return myLocation.peek();
     }
   }

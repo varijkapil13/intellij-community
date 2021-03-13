@@ -15,12 +15,16 @@
  */
 package com.intellij.refactoring.safeDelete;
 
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspectionBase;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.java.JavaBundle;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.PsiSearchHelper;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.changeSignature.CallerChooserBase;
@@ -41,27 +45,24 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 abstract class SafeDeleteJavaCalleeChooser extends CallerChooserBase<PsiElement> {
-  private final Project myProject;
-
   SafeDeleteJavaCalleeChooser(PsiMember member,
                                      Project project,
                                      ArrayList<UsageInfo> result) {
     super(member, project, JavaRefactoringBundle.message("safe.delete.select.members.to.propagate.dialog.title"), null, "dummy." + JavaFileType.INSTANCE.getDefaultExtension(), members -> result.addAll(ContainerUtil.map(members, m -> {
       return new SafeDeleteReferenceJavaDeleteUsageInfo(m, m, true);
     })));
-    myProject = project;
   }
 
   protected abstract ArrayList<SafeDeleteMemberCalleeUsageInfo> getTopLevelItems();
 
   @Override
-  protected String getEmptyCallerText() {
-    return "Caller text with highlighted callee would be shown here";
+  protected @NlsContexts.Label String getEmptyCallerText() {
+    return JavaRefactoringBundle.message("java.safe.delete.caller.text");
   }
 
   @Override
-  protected String getEmptyCalleeText() {
-    return "Callee text would be shown here";
+  protected @NlsContexts.Label String getEmptyCalleeText() {
+    return JavaRefactoringBundle.message("java.safe.delete.empty.callee.text");
   }
   
   @Override
@@ -102,7 +103,9 @@ abstract class SafeDeleteJavaCalleeChooser extends CallerChooserBase<PsiElement>
                   .map(result -> result.getElement())
                   .filter(e -> !(e instanceof PsiMember))
                   .toArray(PsiElement[]::new);
-                ContainerUtil.addAllNotNull(elementsToCheck, nonMembers);
+                if (nonMembers.length < 10) {
+                  ContainerUtil.addAllNotNull(elementsToCheck, nonMembers);
+                }
               }
               else {
                 PsiElement resolve = reference.resolve();
@@ -118,6 +121,7 @@ abstract class SafeDeleteJavaCalleeChooser extends CallerChooserBase<PsiElement>
           .stream()
           .filter(m -> !(m instanceof PsiMember) || containingClass.equals(((PsiMember)m).getContainingClass()) && !psiMember.equals(m))
           .filter(m -> !(m instanceof PsiMethod) || ((PsiMethod)m).findDeepestSuperMethods().length == 0)
+          .filter(m -> m.isPhysical())
           .filter(m -> usedOnlyIn(m, psiMember))
           .collect(Collectors.toList());
       }
@@ -202,7 +206,22 @@ abstract class SafeDeleteJavaCalleeChooser extends CallerChooserBase<PsiElement>
   }
 
   private static boolean usedOnlyIn(@NotNull PsiElement explored, @NotNull PsiMember place) {
-    CommonProcessors.FindProcessor<PsiReference> findProcessor = new CommonProcessors.FindProcessor<PsiReference>() {
+    if (explored instanceof PsiNamedElement) {
+      final String name = ((PsiNamedElement)explored).getName();
+      if (name != null && 
+          PsiSearchHelper.getInstance(explored.getProject())
+            .isCheapEnoughToSearch(name, GlobalSearchScope.projectScope(explored.getProject()), null, null) == PsiSearchHelper.SearchCostResult.TOO_MANY_OCCURRENCES) {
+        return false;
+      }
+    }
+    if (explored instanceof PsiClassOwner) {
+      for (PsiClass aClass : ((PsiClassOwner)explored).getClasses()) {
+        if (!usedOnlyIn(aClass, place)) return false;
+      }
+      return true;
+    }
+    if (UnusedDeclarationInspectionBase.isDeclaredAsEntryPoint(explored)) return false;
+    CommonProcessors.FindProcessor<PsiReference> findProcessor = new CommonProcessors.FindProcessor<>() {
       @Override
       protected boolean accept(PsiReference reference) {
         final PsiElement element = reference.getElement();

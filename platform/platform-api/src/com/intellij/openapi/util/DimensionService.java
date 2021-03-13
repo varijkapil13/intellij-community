@@ -1,7 +1,11 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.util;
 
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.RoamingType;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -12,7 +16,6 @@ import com.intellij.ui.ComponentUtil;
 import com.intellij.ui.JreHiDpiUtil;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.scale.JBUIScale;
-import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.ui.JBUI;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMaps;
@@ -24,6 +27,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -34,8 +38,8 @@ import java.util.Map;
 public final class DimensionService extends SimpleModificationTracker implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance(DimensionService.class);
 
-  private final Map<String, Point> myKeyToLocation = CollectionFactory.createSmallMemoryFootprintLinkedMap();
-  private final Map<String, Dimension> myKeToSize = CollectionFactory.createSmallMemoryFootprintLinkedMap();
+  private final Map<String, Point> myKeyToLocation = new LinkedHashMap<>();
+  private final Map<String, Dimension> myKeToSize = new LinkedHashMap<>();
   private final Object2IntMap<String> myKeyToExtendedState = new Object2IntOpenHashMap<>();
   @NonNls private static final String EXTENDED_STATE = "extendedState";
   @NonNls private static final String KEY = "key";
@@ -48,7 +52,7 @@ public final class DimensionService extends SimpleModificationTracker implements
   @NonNls private static final String ATTRIBUTE_HEIGHT = "height";
 
   public static DimensionService getInstance() {
-    return ServiceManager.getService(DimensionService.class);
+    return ApplicationManager.getApplication().getService(DimensionService.class);
   }
 
   /**
@@ -58,14 +62,17 @@ public final class DimensionService extends SimpleModificationTracker implements
    * is outside of current screen bounds then the method returns {@code null}. It
    * properly works in multi-monitor configuration.
    * @throws IllegalArgumentException if {@code key} is {@code null}.
+   *
+   * @deprecated use {@link #getLocation(String, Project)} instead.
    */
+  @Deprecated
   @Nullable
   public synchronized Point getLocation(String key) {
     return getLocation(key, guessProject());
   }
 
   @Nullable
-  public synchronized Point getLocation(@NotNull String key, Project project) {
+  public synchronized Point getLocation(@NotNull String key, @Nullable Project project) {
     Point point = project == null ? null : WindowStateService.getInstance(project).getLocation(key);
     if (point != null) return point;
 
@@ -89,12 +96,15 @@ public final class DimensionService extends SimpleModificationTracker implements
    * @param key   a String key to store location for.
    * @param point location to save.
    * @throws IllegalArgumentException if {@code key} is {@code null}.
+   *
+   * @deprecated use {@link #setLocation(String, Point, Project)} instead.
    */
+  @Deprecated
   public synchronized void setLocation(String key, Point point) {
     setLocation(key, point, guessProject());
   }
 
-  public synchronized void setLocation(@NotNull String key, Point point, Project project) {
+  public synchronized void setLocation(@NotNull String key, Point point, @Nullable Project project) {
     getWindowStateService(project).putLocation(key, point);
     Pair<String, Float> pair = keyPair(key, project);
     if (point != null) {
@@ -114,14 +124,17 @@ public final class DimensionService extends SimpleModificationTracker implements
    * @return point stored under the specified {@code key}. The method returns
    * {@code null} if there is no stored value under the {@code key}.
    * @throws IllegalArgumentException if {@code key} is {@code null}.
+   *
+   * @deprecated use {@link #getSize(String, Project)} instead.
    */
+  @Deprecated
   @Nullable
   public synchronized Dimension getSize(@NotNull @NonNls String key) {
     return getSize(key, guessProject());
   }
 
   @Nullable
-  public synchronized Dimension getSize(@NotNull @NonNls String key, Project project) {
+  public synchronized Dimension getSize(@NotNull @NonNls String key, @Nullable Project project) {
     Dimension size = project == null ? null : WindowStateService.getInstance(project).getSize(key);
     if (size != null) return size;
 
@@ -142,12 +155,15 @@ public final class DimensionService extends SimpleModificationTracker implements
    * @param key  a String key to to save size for.
    * @param size a Size to save.
    * @throws IllegalArgumentException if {@code key} is {@code null}.
+   *
+   * @deprecated use {@link #setSize(String, Dimension, Project)} instead.
    */
+  @Deprecated
   public synchronized void setSize(@NotNull @NonNls String key, Dimension size) {
     setSize(key, size, guessProject());
   }
 
-  public synchronized void setSize(@NotNull @NonNls String key, Dimension size, Project project) {
+  public synchronized void setSize(@NotNull @NonNls String key, Dimension size, @Nullable Project project) {
     getWindowStateService(project).putSize(key, size);
     Pair<String, Float> pair = keyPair(key, project);
     if (size != null) {
@@ -233,6 +249,7 @@ public final class DimensionService extends SimpleModificationTracker implements
     }
   }
 
+  @Deprecated
   @Nullable
   private static Project guessProject() {
     Project[] openProjects = ProjectManager.getInstance().getOpenProjects();

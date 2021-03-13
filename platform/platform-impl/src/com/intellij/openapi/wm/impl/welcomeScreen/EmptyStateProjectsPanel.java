@@ -1,16 +1,18 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.wm.impl.welcomeScreen;
 
-import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl;
 import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Couple;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.ui.components.AnActionLink;
+import com.intellij.ui.components.DropDownLink;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.scale.JBUIScale;
@@ -23,11 +25,13 @@ import javax.swing.*;
 import java.awt.*;
 
 import static com.intellij.openapi.wm.impl.welcomeScreen.ProjectsTabFactory.PRIMARY_BUTTONS_NUM;
-import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenComponentFactory.*;
+import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenActionsUtil.LargeIconWithTextWrapper;
+import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenActionsUtil.splitAndWrapActions;
+import static com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenComponentFactory.getApplicationTitle;
 
 public class EmptyStateProjectsPanel extends JPanel {
 
-  public EmptyStateProjectsPanel() {
+  public EmptyStateProjectsPanel(@NotNull Disposable parentDisposable) {
     setBackground(WelcomeScreenUIManager.getMainAssociatedComponentBackground());
     JPanel mainPanel = new NonOpaquePanel(new VerticalFlowLayout());
     mainPanel.setBorder(JBUI.Borders.emptyTop(103));
@@ -37,9 +41,9 @@ public class EmptyStateProjectsPanel extends JPanel {
     mainPanel.add(createCommentLabel(IdeBundle.message("welcome.screen.empty.projects.open.comment")));
 
     Couple<DefaultActionGroup> mainAndMore =
-      splitActionGroupToMainAndMore((ActionGroup)ActionManager.getInstance().getAction(IdeActions.GROUP_WELCOME_SCREEN_QUICKSTART),
-                                    PRIMARY_BUTTONS_NUM);
-
+      splitAndWrapActions((ActionGroup)ActionManager.getInstance().getAction(IdeActions.GROUP_WELCOME_SCREEN_QUICKSTART_EMPTY_STATE),
+                          action -> ActionGroupPanelWrapper.wrapGroups(action, parentDisposable),
+                          PRIMARY_BUTTONS_NUM);
     ActionGroup main = new DefaultActionGroup(
       ContainerUtil.map2List(mainAndMore.getFirst().getChildren(null), LargeIconWithTextWrapper::wrapAsBigIconWithText));
 
@@ -48,8 +52,10 @@ public class EmptyStateProjectsPanel extends JPanel {
 
     DefaultActionGroup moreActionGroup = mainAndMore.getSecond();
     if (moreActionGroup.getChildrenCount() > 0) {
-      LinkLabel<String> moreLink = createLinkWithPopup(moreActionGroup);
-      JPanel moreLinkPanel = new Wrapper(new FlowLayout(), moreLink);
+      JPanel moreLinkPanel = new Wrapper(new FlowLayout(), moreActionGroup.getChildrenCount() == 1
+                                                           ? new AnActionLink(moreActionGroup.getChildren(null)[0], ActionPlaces.WELCOME_SCREEN)
+                                                           : createLinkWithPopup(moreActionGroup));
+      moreLinkPanel.setBorder(JBUI.Borders.emptyTop(5));
       mainPanel.add(moreLinkPanel);
     }
 
@@ -66,20 +72,11 @@ public class EmptyStateProjectsPanel extends JPanel {
   }
 
   @NotNull
-  static LinkLabel<String> createLinkWithPopup(@NotNull ActionGroup actionGroup) {
-    LinkLabel<String> moreLink =
-      new LinkLabel<>(actionGroup.getTemplateText(), AllIcons.General.LinkDropTriangle, (s, __) ->
-      {
-        JBPopupFactory.getInstance().createActionGroupPopup(null, actionGroup,
-                                                            DataManager
-                                                              .getInstance()
-                                                              .getDataContext(s),
-                                                            JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,
-                                                            true).showUnderneathOf(s);
-      }, null);
-    moreLink.setHorizontalTextPosition(SwingConstants.LEADING);
-    moreLink.setBorder(JBUI.Borders.emptyTop(30));
-    return moreLink;
+  static DropDownLink<String> createLinkWithPopup(@NotNull ActionGroup group) {
+    return new DropDownLink<>(group.getTemplateText(), link
+      -> JBPopupFactory.getInstance().createActionGroupPopup(
+      null, group, DataManager.getInstance().getDataContext(link),
+      JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true));
   }
 
   @NotNull
@@ -93,7 +90,7 @@ public class EmptyStateProjectsPanel extends JPanel {
   }
 
   @NotNull
-  static JBLabel createCommentLabel(@NotNull String text) {
+  static JBLabel createCommentLabel(@NlsContexts.HintText @NotNull String text) {
     JBLabel commentFirstLabel = new JBLabel(text, SwingConstants.CENTER);
     commentFirstLabel.setOpaque(false);
     commentFirstLabel.setForeground(UIUtil.getContextHelpForeground());

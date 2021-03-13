@@ -47,6 +47,7 @@ public class PythonDocumentationConfigurable implements SearchableConfigurable, 
   @Override
   public JComponent createComponent() {
     SwingUtilities.updateComponentTreeUI(myPanel); // TODO: create Swing components in this method (see javadoc)
+    myPanel.getTable().setShowGrid(false);
     return myPanel;
   }
 
@@ -76,7 +77,9 @@ public class PythonDocumentationConfigurable implements SearchableConfigurable, 
 
     @Override
     public String getColumnName(int columnIndex) {
-      return columnIndex == 0 ? "Module Name" : "URL/Path Pattern";
+      return columnIndex == 0
+             ? PyBundle.message("external.documentation.column.name.module")
+             : PyBundle.message("external.documentation.column.name.url.path.pattern");
     }
 
     @Override
@@ -139,5 +142,4 @@ public class PythonDocumentationConfigurable implements SearchableConfigurable, 
       return showEditor(o);
     }
   }
-
 }

@@ -832,9 +832,11 @@ public abstract class JBIterable<E> implements Iterable<E> {
    */
   @NotNull
   public final List<E> toList() {
+    if (this == EMPTY) return Collections.emptyList();
     Iterable<E> itt = asIterable();
     if (itt == null) return Collections.singletonList(asElement());
-    return Collections.unmodifiableList(ContainerUtil.newArrayList(itt));
+    ArrayList<E> result = ContainerUtil.newArrayList(itt);
+    return result.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(result);
   }
 
   /**
@@ -842,11 +844,11 @@ public abstract class JBIterable<E> implements Iterable<E> {
    */
   @NotNull
   public final Set<E> toSet() {
-    Iterable<E> iterable = asIterable();
-    if (iterable == null) {
-      return Collections.singleton(asElement());
-    }
-    return Collections.unmodifiableSet(ContainerUtil.newLinkedHashSet(iterable));
+    if (this == EMPTY) return Collections.emptySet();
+    Iterable<E> itt = asIterable();
+    if (itt == null) return Collections.singleton(asElement());
+    LinkedHashSet<E> result = ContainerUtil.newLinkedHashSet(itt);
+    return result.isEmpty() ? Collections.emptySet() : Collections.unmodifiableSet(result);
   }
 
   /**
@@ -854,10 +856,9 @@ public abstract class JBIterable<E> implements Iterable<E> {
    * @see List#toArray(Object[])
    */
   public final E @NotNull [] toArray(E @NotNull [] array) {
+    if (this == EMPTY) return array;
     Iterable<E> itt = asIterable();
-    if (itt == null) {
-      return Collections.singletonList(asElement()).toArray(array);
-    }
+    if (itt == null) return Collections.singletonList(asElement()).toArray(array);
     return ContainerUtil.newArrayList(itt).toArray(array);
   }
 
@@ -868,6 +869,7 @@ public abstract class JBIterable<E> implements Iterable<E> {
   @NotNull
   public final <K, V> Map<K, V> toMap(@NotNull Convertor<? super E, ? extends K> toKey,
                                       @NotNull Convertor<? super E, ? extends V> toValue) {
+    if (this == EMPTY) return Collections.emptyMap();
     Map<K, V> map = new LinkedHashMap<>();
     for (E e : this) map.put(toKey.convert(e), toValue.convert(e));
     return map.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(map);
@@ -896,6 +898,7 @@ public abstract class JBIterable<E> implements Iterable<E> {
    */
   @NotNull
   public final <C extends Collection<? super E>> C addAllTo(@NotNull C collection) {
+    if (this == EMPTY) return collection;
     Collection<E> col = asCollection();
     if (col != null) {
       collection.addAll(col);
@@ -914,6 +917,11 @@ public abstract class JBIterable<E> implements Iterable<E> {
     return collection;
   }
 
+  /**
+   * Base class for all stateful filters and functions.
+   * A separate cloned instance (shallow copy) is used for each iterator.
+   * All mutable non-primitive fields <b>MUST BE</b> lazily initialized in {@link Condition#value(Object)} or {@link Function#fun(Object)} method.
+   * */
   public abstract static class Stateful<Self extends Stateful<?>> implements Cloneable {
     @NotNull
     static <T> T copy(@NotNull T o) {
@@ -935,12 +943,16 @@ public abstract class JBIterable<E> implements Iterable<E> {
   }
 
   /**
-   * Stateful {@link Conditions}: a separate cloned instance is used for each iterator.
+   * Stateful {@link Conditions}.
+   * A separate cloned instance (shallow copy) is used for each iterator.
+   * All mutable non-primitive fields <b>MUST BE</b> lazily initialized in {@link #value(Object)} method.
    */
   public abstract static class SCond<T> extends Stateful<SCond<T>> implements Condition<T> { }
 
   /**
-   * Stateful {@link Function}: a separate cloned instance is used for each iterator.
+   * Stateful {@link Function}. 
+   * A separate cloned instance (shallow copy) is used for each iterator.
+   * All mutable non-primitive fields <b>MUST BE</b> lazily initialized in {@link #fun(Object)} method.
    */
   public abstract static class SFun<S, T> extends Stateful<SFun<S, T>> implements Function<S, T> { }
 

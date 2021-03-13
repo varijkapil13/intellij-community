@@ -1,5 +1,7 @@
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.settings
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
 
 @State(
@@ -20,7 +22,7 @@ class SpaceSettings : SimplePersistentStateComponent<SpaceSettingsState>(SpaceSe
     }
 
   companion object {
-    fun getInstance(): SpaceSettings = ServiceManager.getService(SpaceSettings::class.java)
+    fun getInstance(): SpaceSettings = ApplicationManager.getApplication().getService(SpaceSettings::class.java)
   }
 }
 
@@ -29,10 +31,10 @@ class SpaceSettingsState : BaseState() {
     it.enabled.not() && it.server.isBlank()
   }
 
-  var cloneType: CloneType by enum(CloneType.HTTP)
+  var cloneType: CloneType by enum(CloneType.HTTPS)
 }
 
 enum class CloneType {
-  HTTP,
+  HTTPS,
   SSH
 }

@@ -78,7 +78,7 @@ public class DefaultInferredAnnotationProvider implements InferredAnnotationProv
       if (listOwner instanceof PsiParameter) {
         anno = getInferredNullabilityAnnotation((PsiParameter)listOwner);
       }
-      return anno == null ? null : annotationFQN.equals(anno.getQualifiedName()) ? anno : null;
+      return anno == null ? null : anno.hasQualifiedName(annotationFQN) ? anno : null;
     }
 
     if (Mutability.UNMODIFIABLE_ANNOTATION.equals(annotationFQN) || Mutability.UNMODIFIABLE_VIEW_ANNOTATION.equals(annotationFQN)) {
@@ -117,7 +117,9 @@ public class DefaultInferredAnnotationProvider implements InferredAnnotationProv
   private boolean ignoreInference(@NotNull PsiModifierListOwner owner, @Nullable String annotationFQN) {
     if (annotationFQN == null) return true;
     if (owner instanceof PsiMethod && PsiUtil.canBeOverridden((PsiMethod)owner)) {
-      return true;
+      if (!(owner instanceof PsiMethodImpl) || !JavaSourceInference.canInferFromSource((PsiMethodImpl)owner)) {
+        return true;
+      }
     }
     if (ORG_JETBRAINS_ANNOTATIONS_CONTRACT.equals(annotationFQN) && HardcodedContracts.hasHardcodedContracts(owner)) {
       return true;

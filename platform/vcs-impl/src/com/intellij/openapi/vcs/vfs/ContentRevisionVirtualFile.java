@@ -3,7 +3,7 @@
 package com.intellij.openapi.vcs.vfs;
 
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.openapi.vcs.changes.ByteBackedContentRevision;
+import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.containers.ContainerUtil;
@@ -59,18 +59,7 @@ public final class ContentRevisionVirtualFile extends AbstractVcsVirtualFile {
 
   private void loadContent() {
     try {
-      byte[] bytes;
-      if (myContentRevision instanceof ByteBackedContentRevision) {
-        bytes = ((ByteBackedContentRevision)myContentRevision).getContentAsBytes();
-      }
-      else {
-        final String content = myContentRevision.getContent();
-        bytes = content != null ? content.getBytes(getCharset()) : null;
-      }
-
-      if (bytes == null) {
-        throw new VcsException("Could not load content");
-      }
+      byte[] bytes = ChangesUtil.loadContentRevision(myContentRevision);
 
       synchronized (LOCK) {
         myContent = bytes;

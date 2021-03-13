@@ -1,7 +1,9 @@
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.components
 
 import circlet.client.api.englishFullName
 import circlet.platform.client.ConnectionStatus
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.space.ui.SpaceAvatarUtils
@@ -13,17 +15,21 @@ import libraries.klogging.logger
 import runtime.reactive.Property
 import runtime.reactive.awaitFirst
 import runtime.reactive.filter
-import runtime.reactive.mapInit
+import runtime.reactive.property.mapInit
 
 @Service
-class SpaceUserAvatarProvider {
-  private val log = logger<SpaceUserAvatarProvider>()
+class SpaceUserAvatarProvider : Disposable {
+  companion object {
+    private val LOG = logger<SpaceUserAvatarProvider>()
+
+    fun getInstance(): SpaceUserAvatarProvider = service()
+  }
 
   private val lifetime: LifetimeSource = LifetimeSource()
 
   private val avatarPlaceholders: SpaceAvatars = SpaceAvatars.MainIcon
 
-  val avatars: Property<SpaceAvatars> = lifetime.mapInit(space.workspace, avatarPlaceholders) { ws ->
+  val avatars: Property<SpaceAvatars> = lifetime.mapInit(SpaceWorkspaceComponent.getInstance().workspace, avatarPlaceholders) { ws ->
     ws ?: return@mapInit avatarPlaceholders
     val id = ws.me.value.username
     val name = ws.me.value.englishFullName()
@@ -35,7 +41,7 @@ class SpaceUserAvatarProvider {
     ws.client.connectionStatus.filter { it is ConnectionStatus.Connected }.awaitFirst(ws.lifetime)
 
     try {
-      log.info { "loading user avatar: $avatarTID" }
+      LOG.info { "loading user avatar: $avatarTID" }
       val loadedImage = imageLoader.loadImageAsync(avatarTID)?.await()
       if (loadedImage == null) {
         SpaceAvatarUtils.generateAvatars(id, name)
@@ -48,13 +54,13 @@ class SpaceUserAvatarProvider {
       throw th
     }
     catch (e: Exception) {
-      log.error { "user avatar not loaded: $e" }
+      LOG.error { "user avatar not loaded: $e" }
       avatarPlaceholders
     }
   }
 
-  companion object {
-    fun getInstance(): SpaceUserAvatarProvider = service()
+  override fun dispose() {
+    lifetime.terminate()
   }
 }
 

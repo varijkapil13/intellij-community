@@ -12,6 +12,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
@@ -75,8 +76,22 @@ public final class FileCollectionFactory {
     return new ObjectOpenCustomHashSet<>(FILE_HASH_STRATEGY);
   }
 
-  public static @NotNull Set<File> createCanonicalFileSet(@NotNull Collection<File> files) {
+  public static @NotNull Set<File> createCanonicalFileSet(@NotNull Collection<? extends File> files) {
     return new ObjectOpenCustomHashSet<>(files, FILE_HASH_STRATEGY);
+  }
+
+  public static @NotNull Set<Path> createCanonicalPathSet(@NotNull Collection<? extends Path> files) {
+    return new ObjectOpenCustomHashSet<>(files, new SerializableHashStrategy<Path>() {
+      @Override
+      public int hashCode(@Nullable Path o) {
+        return FileUtilRt.pathHashCode(o == null ? null : o.toString());
+      }
+
+      @Override
+      public boolean equals(@Nullable Path a, @Nullable Path b) {
+        return FileUtilRt.pathsEqual(a == null ? null : a.toString(), b == null ? null : b.toString());
+      }
+    });
   }
 
   public static @NotNull Set<File> createCanonicalFileLinkedSet() {

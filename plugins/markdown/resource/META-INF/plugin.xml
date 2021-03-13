@@ -5,6 +5,7 @@
   <category>Languages</category>
   <resource-bundle>messages.MarkdownBundle</resource-bundle>
   <depends>com.intellij.modules.lang</depends>
+  <depends>com.intellij.platform.images</depends>
   <depends optional="true" config-file="plugin-intelliLang.xml">org.intellij.intelliLang</depends>
 
   <description><![CDATA[
@@ -68,8 +69,17 @@ Includes the following features:</p>
 
     <fileEditorProvider implementation="org.intellij.plugins.markdown.ui.preview.MarkdownSplitEditorProvider"/>
 
+    <customPasteProvider implementation="org.intellij.plugins.markdown.editor.MarkdownImagePasteProvider"/>
+
     <spellchecker.support language="Markdown"
                           implementationClass="org.intellij.plugins.markdown.spellchecking.MarkdownSpellcheckingStrategy"/>
+
+    <applicationService serviceImplementation="org.intellij.plugins.markdown.settings.pandoc.PandocApplicationSettings"/>
+    <applicationConfigurable id="Settings.Pandoc"
+                             bundle="messages.MarkdownBundle"
+                             groupId="tools"
+                             key="markdown.settings.pandoc.name"
+                             instance="org.intellij.plugins.markdown.settings.pandoc.PandocSettingsConfigurable"/>
 
     <applicationConfigurable id="Settings.Markdown"
                              bundle="messages.MarkdownBundle"
@@ -79,14 +89,14 @@ Includes the following features:</p>
                              instance="org.intellij.plugins.markdown.settings.MarkdownSettingsConfigurable">
     </applicationConfigurable>
     <applicationService serviceImplementation="org.intellij.plugins.markdown.settings.MarkdownApplicationSettings"/>
-    <applicationService serviceImplementation="org.intellij.plugins.markdown.ui.preview.MarkdownCodeFencePluginCache"/>
+    <applicationService serviceImplementation="org.intellij.plugins.markdown.ui.preview.html.MarkdownCodeFencePluginCache"/>
     <lang.psiStructureViewFactory language="Markdown"
                                   implementationClass="org.intellij.plugins.markdown.structureView.MarkdownStructureViewFactory"/>
     <psi.referenceContributor implementation="org.intellij.plugins.markdown.lang.references.MarkdownReferenceProvider"/>
     <stripTrailingSpacesFilterFactory implementation="org.intellij.plugins.markdown.editor.MarkdownStripTrailingSpacesFilterFactory"/>
     <httpRequestHandler implementation="org.intellij.plugins.markdown.ui.preview.PreviewStaticServer"/>
 
-    <localInspection shortName="MarkdownUnresolvedFileReference" bundle="messages.MarkdownBundle"
+    <localInspection language="Markdown" shortName="MarkdownUnresolvedFileReference" bundle="messages.MarkdownBundle"
                      key="markdown.unresolved.file.inspection.name" groupKey="markdown.inspection.group.ruby.name"
                      enabledByDefault="true" level="WARNING"
                      implementationClass="org.intellij.plugins.markdown.lang.references.MarkdownUnresolvedFileReferenceInspection"/>
@@ -105,12 +115,13 @@ Includes the following features:</p>
     <lang.formatter language="Markdown" implementationClass="org.intellij.plugins.markdown.lang.formatter.MarkdownFormattingModelBuilder"/>
     <lang.lineWrapStrategy language="Markdown" implementationClass="org.intellij.plugins.markdown.editor.MarkdownLineWrapPositionStrategy"/>
 
+    <lang.commenter language="Markdown" implementationClass="org.intellij.plugins.markdown.lang.MarkdownCommenter"/>
 
     <intentionAction>
       <className>org.intellij.plugins.markdown.injection.MarkdownCodeFenceErrorHighlightingIntention</className>
       <category>Markdown</category>
     </intentionAction>
-    <notificationAllowlist groupIds="Markdown headers group;Markdown"/>
+    <notificationGroup id="Markdown" displayType="BALLOON"/>
 
     <registryKey key="markdown.clear.cache.interval"
                  defaultValue="600000"
@@ -124,9 +135,12 @@ Includes the following features:</p>
     <registryKey key="markdown.formatter.apply.to.code.fence"
                  defaultValue="false"
                  description="Should Markdown use injected languages' formatters to format code-fences"/>
-    <registryKey key="markdown.mermaid.download.link"
-                 defaultValue="https://unpkg.com/mermaid@8.6.0/dist/mermaid.js"
-                 description="Link which Markdown plugin will use to download Mermaid.js library"/>
+    <registryKey key="markdown.mermaid.theme"
+                 defaultValue="follow-ide"
+                 description="Theme name to be used for Mermaid.js diagrams (set to 'follow-ide' to let the IDE decide)"/>
+    <registryKey key="markdown.structure.view.list.visibility"
+                 defaultValue="false"
+                 description="Determines whether lists are visible in the document structure view"/>
   </extensions>
 
   <applicationListeners>

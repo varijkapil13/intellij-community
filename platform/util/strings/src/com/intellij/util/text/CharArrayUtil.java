@@ -2,13 +2,13 @@
 package com.intellij.util.text;
 
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtilRt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Reader;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public final class CharArrayUtil {
@@ -107,7 +107,7 @@ public final class CharArrayUtil {
    */
   public static char @NotNull [] fromSequence(@NotNull CharSequence seq) {
     char[] underlying = fromSequenceWithoutCopying(seq);
-    return underlying != null ? Arrays.copyOf(underlying, underlying.length) : fromSequence(seq, 0, seq.length());
+    return underlying != null ? underlying.clone() : fromSequence(seq, 0, seq.length());
   }
 
   /**
@@ -294,6 +294,17 @@ public final class CharArrayUtil {
 
     for (int i = start1,j=start2; i < end1; i++,j++) {
       if (s1.charAt(i) != s2.charAt(j)) return false;
+    }
+    return true;
+  }
+  public static boolean regionMatches(@NotNull CharSequence s1, int start1, int end1, @NotNull CharSequence s2, int start2, int end2, boolean caseSensitive) {
+    if (caseSensitive) {
+      return regionMatches(s1, start1, end1, s2, start2, end2);
+    }
+    if (end1-start1 != end2-start2) return false;
+
+    for (int i = start1,j=start2; i < end1; i++,j++) {
+      if (!StringUtilRt.charsEqualIgnoreCase(s1.charAt(i), s2.charAt(j))) return false;
     }
     return true;
   }

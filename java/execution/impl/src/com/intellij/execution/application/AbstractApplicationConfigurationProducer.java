@@ -10,7 +10,10 @@ import com.intellij.execution.junit.JavaRunConfigurationProducerBase;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Ref;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.util.PsiMethodUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
@@ -22,23 +25,15 @@ public abstract class AbstractApplicationConfigurationProducer<T extends Applica
     super();
   }
 
-  /**
-   * @deprecated Override {@link #getConfigurationFactory()}.
-   */
-  @Deprecated
-  public AbstractApplicationConfigurationProducer(@NotNull ApplicationConfigurationType configurationType) {
-    super(configurationType);
-  }
-
   @Override
   protected boolean setupConfigurationFromContext(@NotNull T configuration,
                                                   @NotNull ConfigurationContext context,
                                                   @NotNull Ref<PsiElement> sourceElement) {
-    final Location contextLocation = context.getLocation();
+    final Location<?> contextLocation = context.getLocation();
     if (contextLocation == null) {
       return false;
     }
-    final Location location = JavaExecutionUtil.stepIntoSingleClass(contextLocation);
+    final Location<?> location = JavaExecutionUtil.stepIntoSingleClass(contextLocation);
     if (location == null) {
       return false;
     }
@@ -51,17 +46,17 @@ public abstract class AbstractApplicationConfigurationProducer<T extends Applica
       return false;
     }
     PsiFile containingFile = aClass.getContainingFile();
-    if (containingFile instanceof PsiJavaFile && HighlightClassUtil.isJavaHashBangScript((PsiJavaFile)containingFile)) {
+    if (HighlightClassUtil.isJavaHashBangScript(containingFile)) {
       return false;
     }
     PsiMethod method = PsiMethodUtil.findMainInClass(aClass);
     if (method != null && PsiTreeUtil.isAncestor(method, element, false)) {
       sourceElement.set(method);
-      setupConfiguration(configuration, aClass, context);
-      return true;
+    }
+    else {
+      sourceElement.set(aClass);
     }
 
-    sourceElement.set(aClass);
     setupConfiguration(configuration, aClass, context);
     return true;
   }

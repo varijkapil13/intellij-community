@@ -4,9 +4,12 @@ package com.intellij.slicer;
 import com.intellij.codeInsight.Nullability;
 import com.intellij.codeInspection.dataFlow.CommonDataflow;
 import com.intellij.codeInspection.dataFlow.DfaNullability;
+import com.intellij.codeInspection.dataFlow.SpecialField;
 import com.intellij.codeInspection.dataFlow.TypeConstraint;
 import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
 import com.intellij.codeInspection.dataFlow.types.*;
+import com.intellij.java.JavaBundle;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -94,6 +97,12 @@ final class DfaBasedFilter {
       // Implicit widening conversion
       return DfTypes.longRange(((DfIntType)type).getRange());
     }
+    if (type instanceof DfReferenceType) {
+      SpecialField field = ((DfReferenceType)type).getSpecialField();
+      if (field != null && !field.isStable()) {
+        type = ((DfReferenceType)type).dropSpecialField();
+      }
+    }
     return type;
   }
 
@@ -114,6 +123,7 @@ final class DfaBasedFilter {
   }
 
   private @Nullable static PsiType getElementType(@NotNull PsiElement element) {
+    if (DumbService.isDumb(element.getProject())) return null;
     if (element instanceof PsiExpression) {
       return ((PsiExpression)element).getType();
     }
@@ -144,18 +154,18 @@ final class DfaBasedFilter {
       if (constraint.getPresentationText(psiType).isEmpty()) {
         stripped = stripped.dropTypeConstraint();
       }
-      String constraintText = stripped.toString();
+      @Nls String constraintText = stripped.toString();
       if (nullability == DfaNullability.NOT_NULL) {
         if (constraintText.isEmpty()) {
-          return "not-null";
+          return JavaBundle.message("dfa.constraint.not.null");
         }
-        return constraintText + " (not-null)";
+        return JavaBundle.message("dfa.constraint.0.not.null", constraintText);
       }
       else if (nullability != DfaNullability.NULL) {
         if (constraintText.isEmpty()) {
           return "";
         }
-        return "null or " + constraintText;
+        return JavaBundle.message("dfa.constraint.null.or.0", constraintText);
       }
     }
     return type.toString();

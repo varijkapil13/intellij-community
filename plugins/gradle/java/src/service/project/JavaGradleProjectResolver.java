@@ -22,7 +22,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.util.Consumer;
 import com.intellij.util.Function;
-import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.execution.ParametersListUtil;
 import org.gradle.api.JavaVersion;
@@ -174,9 +173,10 @@ public class JavaGradleProjectResolver extends AbstractProjectResolverExtension 
   public void enhanceTaskProcessing(@NotNull List<String> taskNames,
                                     @NotNull Consumer<String> initScriptConsumer,
                                     @NotNull Map<String, String> parameters) {
-    String testExecutionExpected = parameters.get(GradleProjectResolverExtension.TEST_EXECUTION_EXPECTED_KEY);
 
-    if (Boolean.valueOf(testExecutionExpected)) {
+    boolean testsWillBeExecuted = Boolean.parseBoolean(parameters.get(TEST_EXECUTION_EXPECTED_KEY));
+    boolean testLauncherWillBeUsed = Boolean.parseBoolean(parameters.get(TEST_LAUNCHER_WILL_BE_USED_KEY));
+    if (testsWillBeExecuted && !testLauncherWillBeUsed) {
       String name = "/org/jetbrains/plugins/gradle/java/addTestListener.groovy";
       try (Reader reader = new InputStreamReader(getClass().getResourceAsStream(name), StandardCharsets.UTF_8)) {
         initScriptConsumer.consume(StreamUtil.readText(reader));
@@ -225,7 +225,7 @@ public class JavaGradleProjectResolver extends AbstractProjectResolverExtension 
         "    }",
         "}",
       };
-      final String script = StringUtil.join(lines, SystemProperties.getLineSeparator());
+      final String script = StringUtil.join(lines, System.lineSeparator());
       initScriptConsumer.consume(script);
     }
 
@@ -235,7 +235,7 @@ public class JavaGradleProjectResolver extends AbstractProjectResolverExtension 
 
   @NotNull
   private static String toStringListLiteral(@NotNull List<String> strings, @NotNull String separator) {
-    final List<String> quotedStrings = ContainerUtil.map(strings, s -> toStringLiteral(s));
+    final List<String> quotedStrings = ContainerUtil.map(strings, s -> StringUtil.escapeChar(toStringLiteral(s), '$'));
     return StringUtil.join(quotedStrings, separator);
   }
 

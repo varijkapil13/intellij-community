@@ -2,9 +2,9 @@
 package com.intellij.util.text;
 
 import com.intellij.ReviseWhenPortedToJDK;
-import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.text.CharSequenceWithStringHash;
 import com.intellij.openapi.util.text.Strings;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,7 +31,7 @@ public final class ByteArrayCharSequence implements CharSequenceWithStringHash {
   public int hashCode() {
     int h = hash;
     if (h == 0) {
-      hash = h = Strings.stringHashCode(this, myStart, myEnd);
+      hash = h = Strings.stringHashCode(this, 0, length());
     }
     return h;
   }
@@ -49,7 +49,7 @@ public final class ByteArrayCharSequence implements CharSequenceWithStringHash {
   @NotNull
   @Override
   public CharSequence subSequence(int start, int end) {
-    return start == 0 && end == length() ? this : new CharSequenceSubSequence(this, start, end);
+    return start == 0 && end == length() ? this : new ByteArrayCharSequence(myChars, myStart + start, myStart + end);
   }
 
   @Override
@@ -58,33 +58,53 @@ public final class ByteArrayCharSequence implements CharSequenceWithStringHash {
     return new String(myChars, myStart, length(), StandardCharsets.ISO_8859_1);
   }
 
-  /**
-   * @deprecated use {@link #convertToBytesIfPossible(CharSequence)} instead
-   */
-  @Deprecated
-  @NotNull
-  public static CharSequence convertToBytesIfAsciiString(@NotNull String name) {
-    return convertToBytesIfPossible(name);
+  public void getChars(int start, int end, char[] dest, int pos) {
+    for (int idx = start; idx < end; idx++) {
+      dest[idx - start + pos] = (char)(myChars[idx + myStart] & 0xFF); 
+    }
   }
 
   /**
-   * @return instance of {@link ByteArrayCharSequence} if the supplied string can be stored internally
-   * as a byte array of 8-bit code points (for more compact representation); its {@code string} argument otherwise
+   * @deprecated use {@param name} instead because of JEP 254
    */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @NotNull
-  public static CharSequence convertToBytesIfPossible(@NotNull CharSequence string) {
-    if (SystemInfoRt.IS_AT_LEAST_JAVA9) return string; // see JEP 254: Compact Strings
+  public static CharSequence convertToBytesIfAsciiString(@NotNull String name) {
+    return name;
+  }
+
+  /**
+   * @deprecated use {@param string} instead because of JEP 254
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
+  public static @NotNull CharSequence convertToBytesIfPossible(@NotNull CharSequence string) {
+    if (JAVA_9) return string; // see JEP 254: Compact Strings
     if (string.length() == 0) return "";
     if (string instanceof ByteArrayCharSequence) return string;
     byte[] bytes = toBytesIfPossible(string);
     return bytes == null ? string : new ByteArrayCharSequence(bytes);
   }
 
-  byte @NotNull [] getBytes() {
+  private static final boolean JAVA_9;
+  static {
+    boolean hasModuleClass;
+    try {
+      Class.class.getMethod("getModule");
+      hasModuleClass = true;
+    }
+    catch (Throwable t) {
+      hasModuleClass = false;
+    }
+    JAVA_9 = hasModuleClass;
+  }
+
+  private byte @NotNull [] getBytes() {
     return myStart == 0 && myEnd == myChars.length ? myChars : Arrays.copyOfRange(myChars, myStart , myEnd);
   }
 
-  static byte @Nullable [] toBytesIfPossible(@NotNull CharSequence seq) {
+  private static byte @Nullable [] toBytesIfPossible(@NotNull CharSequence seq) {
     if (seq instanceof ByteArrayCharSequence) {
       return ((ByteArrayCharSequence)seq).getBytes();
     }

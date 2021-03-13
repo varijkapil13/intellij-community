@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.usages.impl.rules;
 
 import com.intellij.openapi.vcs.FileStatus;
@@ -6,6 +6,7 @@ import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.usageView.UsageViewBundle;
 import com.intellij.usages.*;
 import com.intellij.usages.rules.PsiElementUsage;
 import com.intellij.usages.rules.SingleParentUsageGroupingRule;
@@ -19,6 +20,10 @@ public class UsageTypeGroupingRule extends SingleParentUsageGroupingRule impleme
   @Nullable
   @Override
   protected UsageGroup getParentGroupFor(@NotNull Usage usage, UsageTarget @NotNull [] targets) {
+    if (usage instanceof UsageWithType) {
+      UsageType usageType = ((UsageWithType)usage).getUsageType();
+      return usageType == null ? null : new UsageTypeGroup(usageType);
+    }
     if (usage instanceof PsiElementUsage) {
       PsiElementUsage elementUsage = (PsiElementUsage)usage;
 
@@ -89,7 +94,7 @@ public class UsageTypeGroupingRule extends SingleParentUsageGroupingRule impleme
     @Override
     @NotNull
     public String getText(@Nullable UsageView view) {
-      return view == null ? myUsageType.toString() : myUsageType.toString(view.getPresentation());
+      return myUsageType.toString();
     }
 
     @Override
@@ -127,7 +132,7 @@ public class UsageTypeGroupingRule extends SingleParentUsageGroupingRule impleme
 
     @Override
     public String toString() {
-      return "Type:" + myUsageType.toString(new UsageViewPresentation());
+      return UsageViewBundle.message("type.0", myUsageType.toString());
     }
   }
 }

@@ -16,6 +16,8 @@
 package com.intellij.testFramework.propertyBased;
 
 import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.lang.LanguageWordCompletion;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.paths.WebReference;
 import com.intellij.psi.*;
@@ -81,6 +83,10 @@ public class CompletionPolicy {
       if (!SyntaxTraverser.psiTraverser(file).filter(PsiErrorElement.class).isEmpty()) {
         return null;
       }
+      if (LanguageWordCompletion.INSTANCE.isEnabledIn(leafType)) {
+        // Looks like plain text. And the word under caret is excluded from word completion anyway.
+        return null;
+      }
       if (!shouldSuggestNonReferenceLeafText(leaf)) return null;
     }
     return leafText;
@@ -92,6 +98,13 @@ public class CompletionPolicy {
 
   public boolean shouldCheckDuplicates(@NotNull Editor editor, @NotNull PsiFile file, @Nullable PsiElement leaf) {
     return leaf != null && !isAfterError(file, leaf);
+  }
+
+  /**
+   * @return whether it's OK for two lookup elements at the same place to have the same presentation (e.g. due to errors in the source code)
+   */
+  public boolean areDuplicatesOk(@NotNull LookupElement item1, @NotNull LookupElement item2) {
+    return false;
   }
 
   private static PsiElement getValidResolveResult(@NotNull PsiReference ref) {

@@ -44,7 +44,6 @@ import java.util.Map;
 import java.util.Objects;
 
 public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, MarkdownPreviewSettings.Holder, Disposable {
-  private static final String JAVA_FX_HTML_PANEL_PROVIDER = "JavaFxHtmlPanelProvider";
   private JPanel myMainPanel;
   private JBCheckBox myCustomCssFromPathEnabled;
   private TextFieldWithBrowseButton myCustomCssPath;
@@ -53,7 +52,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
   private JPanel myCssTitledSeparator;
   private ComboBox myPreviewProvider;
   private ComboBox myDefaultSplitLayout;
-  private JBCheckBox myUseGrayscaleRenderingForJBCheckBox;
   private JPanel myPreviewTitledSeparator;
   private JBCheckBox myAutoScrollCheckBox;
   private JPanel myMultipleProvidersPreviewPanel;
@@ -64,8 +62,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
   private JBCheckBox myHideErrorsCheckbox;
   private MarkdownScriptsTable myScriptsTable;
   private JBLabel myExtensionsHelpMessage;
-
-  private static final Color SUCCESS_COLOR = new JBColor(0x008000, 0x6A8759);
 
   @Nullable
   private EditorEx myEditor;
@@ -106,7 +102,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
     });
 
     myMultipleProvidersPreviewPanel.setVisible(isMultipleProviders());
-    updateUseGrayscaleEnabled();
 
     myDefaultSplitLayout.addActionListener(new ActionListener() {
       @Override
@@ -227,11 +222,17 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
   @NotNull
   @Override
   public MarkdownCssSettings getMarkdownCssSettings() {
+    String customCssText = myEditor != null && !myEditor.isDisposed() ? ReadAction.compute(() -> myEditor.getDocument().getText()) : "";
+    //font change available only from the preview
+    Integer fontSize = MarkdownApplicationSettings.getInstance().getMarkdownCssSettings().getFontSize();
+    String fontFamily = MarkdownApplicationSettings.getInstance().getMarkdownCssSettings().getFontFamily();
+
     return new MarkdownCssSettings(myCustomCssFromPathEnabled.isSelected(),
                                    myCustomCssPath.getText(),
                                    myApplyCustomCssText.isSelected(),
-                                   myEditor != null && !myEditor.isDisposed() ?
-                                   ReadAction.compute(() -> myEditor.getDocument().getText()) : "");
+                                   customCssText,
+                                   fontSize,
+                                   fontFamily);
   }
 
   @NotNull
@@ -290,7 +291,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
         else {
           myLastItem = item;
           myScriptsTable.setState(MarkdownApplicationSettings.getInstance().getExtensionsEnabledState(), provider.getProviderInfo());
-          updateUseGrayscaleEnabled();
         }
       }
     });
@@ -298,15 +298,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
       MarkdownApplicationSettings.getInstance().getExtensionsEnabledState(),
       (MarkdownHtmlPanelProvider.ProviderInfo)myPreviewProvider.getSelectedItem()
     );
-  }
-
-  private void updateUseGrayscaleEnabled() {
-    final MarkdownHtmlPanelProvider.ProviderInfo selected = getSelectedProvider();
-    myUseGrayscaleRenderingForJBCheckBox.setEnabled(isProviderOf(selected, JAVA_FX_HTML_PANEL_PROVIDER));
-  }
-
-  private static boolean isProviderOf(@NotNull MarkdownHtmlPanelProvider.ProviderInfo selected, @NotNull String provider) {
-    return selected.getClassName().contains(provider);
   }
 
   @NotNull
@@ -333,12 +324,9 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
     }
 
     mySplitLayoutModel.setSelectedItem(settings.getSplitEditorLayout());
-    myUseGrayscaleRenderingForJBCheckBox.setSelected(settings.isUseGrayscaleRendering());
     myAutoScrollCheckBox.setSelected(settings.isAutoScrollPreview());
     myVerticalLayout.setSelected(settings.isVerticalSplit());
     myHorizontalLayout.setSelected(!settings.isVerticalSplit());
-
-    updateUseGrayscaleEnabled();
   }
 
   @NotNull
@@ -349,7 +337,6 @@ public class MarkdownSettingsForm implements MarkdownCssSettings.Holder, Markdow
     Objects.requireNonNull(provider);
     return new MarkdownPreviewSettings(mySplitLayoutModel.getSelectedItem(),
                                        provider,
-                                       myUseGrayscaleRenderingForJBCheckBox.isSelected(),
                                        myAutoScrollCheckBox.isSelected(),
                                        myVerticalLayout.isSelected());
   }

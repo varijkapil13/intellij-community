@@ -4,17 +4,17 @@ package org.jetbrains.plugins.github.pullrequest.ui
 import com.intellij.CommonBundle
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.ui.MessageDialogBuilder
-import icons.GithubIcons
+import com.intellij.util.ui.codereview.InlineIconButton
+import icons.VcsCodeReviewIcons
 import org.jetbrains.plugins.github.i18n.GithubBundle
-import org.jetbrains.plugins.github.ui.InlineIconButton
 import java.awt.event.ActionListener
 import java.util.concurrent.CompletableFuture
 import javax.swing.JComponent
 
 internal object GHTextActions {
   fun createDeleteButton(delete: () -> CompletableFuture<out Any?>): JComponent {
-    val icon = GithubIcons.Delete
-    val hoverIcon = GithubIcons.DeleteHovered
+    val icon = VcsCodeReviewIcons.Delete
+    val hoverIcon = VcsCodeReviewIcons.DeleteHovered
     val button = InlineIconButton(icon, hoverIcon, tooltip = CommonBundle.message("button.delete"))
     button.actionListener = ActionListener {
       if (MessageDialogBuilder.yesNo(GithubBundle.message("pull.request.review.comment.delete.dialog.title"),

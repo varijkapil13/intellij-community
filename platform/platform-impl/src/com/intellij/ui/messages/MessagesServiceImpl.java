@@ -8,6 +8,8 @@ import com.intellij.openapi.ui.*;
 import com.intellij.openapi.ui.messages.MessageDialog;
 import com.intellij.openapi.ui.messages.MessagesService;
 import com.intellij.openapi.ui.messages.TwoStepConfirmationDialog;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
@@ -74,7 +76,7 @@ public class MessagesServiceImpl implements MessagesService {
   public int showMoreInfoMessageDialog(Project project,
                                        String message,
                                        String title,
-                                       String moreInfo,
+                                       @NlsContexts.DetailedDescription String moreInfo,
                                        String[] options,
                                        int defaultOptionIndex,
                                        int focusedOptionIndex,
@@ -153,7 +155,7 @@ public class MessagesServiceImpl implements MessagesService {
                                 @Nullable String initialValue,
                                 @Nullable InputValidator validator,
                                 @Nullable TextRange selection,
-                                @Nullable String comment) {
+                                @Nullable @NlsContexts.DetailedDescription String comment) {
     if (isApplicationInUnitTestOrHeadless()) {
       return TestDialogManager.getTestInputImplementation().show(message, validator);
     }
@@ -214,7 +216,7 @@ public class MessagesServiceImpl implements MessagesService {
                                          String title,
                                          Icon icon,
                                          String[] values,
-                                         String initialValue,
+                                         @NlsSafe String initialValue,
                                          InputValidator validator) {
     if (isApplicationInUnitTestOrHeadless()) {
       return TestDialogManager.getTestInputImplementation().show(message, validator);

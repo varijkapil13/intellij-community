@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.memory.agent;
 
 import com.intellij.debugger.DebuggerManager;
@@ -41,6 +41,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.system.CpuArch;
 import one.util.streamex.IntStreamEx;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
@@ -68,7 +69,7 @@ public final class MemoryAgentUtil {
 
   private static final int ESTIMATE_OBJECTS_SIZE_LIMIT = 2000;
 
-  public static void addMemoryAgent(@NotNull JavaParameters parameters) {
+  public static void addMemoryAgent(@NotNull JavaParameters parameters, Project project) {
     if (!DebuggerSettings.getInstance().ENABLE_MEMORY_AGENT) {
       return;
     }
@@ -124,20 +125,24 @@ public final class MemoryAgentUtil {
     }
     path += "=" + args;
     parametersList.add("-agentpath:" + path);
-    listenIfStartupFailed();
+    listenIfStartupFailed(project);
   }
 
   @NotNull
   public static List<JavaReferenceInfo> tryCalculateSizes(@NotNull EvaluationContextImpl context,
                                                           @NotNull List<JavaReferenceInfo> objects) {
     MemoryAgent agent = MemoryAgent.get(context.getDebugProcess());
-    if (!agent.capabilities().canEstimateObjectsSizes()) return objects;
+    if (!agent.getCapabilities().canEstimateObjectsSizes()) return objects;
     if (objects.size() > ESTIMATE_OBJECTS_SIZE_LIMIT) {
       LOG.info("Too many objects to estimate their sizes");
       return objects;
     }
     try {
-      long[] sizes = agent.estimateObjectsSizes(context, ContainerUtil.map(objects, x -> x.getObjectReference()));
+      long[] sizes = agent.estimateObjectsSizes(
+        context,
+        ContainerUtil.map(objects, x -> x.getObjectReference()),
+        Registry.get("debugger.memory.agent.action.timeout").asInteger()
+      ).getResult();
       return IntStreamEx.range(0, objects.size())
         .mapToObj(i -> new SizedReferenceInfo(objects.get(i).getObjectReference(), sizes[i]))
         .reverseSorted(Comparator.comparing(x -> x.size()))
@@ -166,7 +171,7 @@ public final class MemoryAgentUtil {
         if (context.isEvaluationPossible()) {
           if (isInitialized.compareAndSet(false, true)) {
             debugProcess.removeDebugProcessListener(this);
-            MemoryAgentOperations.initializeAgent(context);
+            MemoryAgentInitializer.initializeAgent(context);
           }
         }
       }
@@ -174,7 +179,9 @@ public final class MemoryAgentUtil {
   }
 
   public static boolean isPlatformSupported() {
-    return SystemInfo.isWindows || SystemInfo.isMacIntel64 || SystemInfo.isLinux;
+    return SystemInfo.isWindows && (CpuArch.isIntel32() || CpuArch.isIntel64()) ||
+           SystemInfo.isMac && CpuArch.isIntel64() ||
+           SystemInfo.isLinux && CpuArch.isIntel64();
   }
 
   private static boolean isIbmJdk(@NotNull JavaParameters parameters) {
@@ -194,7 +201,7 @@ public final class MemoryAgentUtil {
     }
 
     return ApplicationManager.getApplication()
-      .executeOnPooledThread(() -> new AgentExtractor().extract(detectAgentKind(jdkPath), getAgentDirectory()))
+      .executeOnPooledThread(() -> AgentExtractor.INSTANCE.extract(detectAgentKind(jdkPath), getAgentDirectory()))
       .get(1, TimeUnit.SECONDS);
   }
 
@@ -231,8 +238,8 @@ public final class MemoryAgentUtil {
    * The purpose of this method is to try catch cases when VM failed to initialize because of memory agent and suggest user
    * disable the agent.
    */
-  private static void listenIfStartupFailed() {
-    Project project = JavaDebuggerSupport.getContextProjectForEditorFieldsInDebuggerConfigurables();
+  private static void listenIfStartupFailed(Project prj) {
+    Project project = prj != null ? prj : JavaDebuggerSupport.getContextProjectForEditorFieldsInDebuggerConfigurables();
     if (Boolean.TRUE.equals(project.getUserData(LISTEN_MEMORY_AGENT_STARTUP_FAILED))) return;
     project.putUserData(LISTEN_MEMORY_AGENT_STARTUP_FAILED, true);
 
@@ -292,9 +299,7 @@ public final class MemoryAgentUtil {
             RuntimeExceptionWithAttachments exception =
               new RuntimeExceptionWithAttachments("Could not start debug process with memory agent", mentionsInOutput);
             String checkboxName = JavaDebuggerBundle.message("label.debugger.general.configurable.enable.memory.agent");
-            String description =
-              "Memory agent could not be loaded. <a href=\"Disable\">Disable</a> the agent. To enable it back use \"" +
-              checkboxName + "\" option in File | Settings | Build, Execution, Deployment | Debugger";
+            String description = JavaDebuggerBundle.message("error.memory.agent.could.not.be.loaded", checkboxName);
             ExecutionUtil.handleExecutionError(project, windowId, name, exception, description, new DisablingMemoryAgentListener());
             LOG.error(exception);
           }

@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.target
 
 import com.intellij.execution.Platform
@@ -51,6 +51,8 @@ interface TargetEnvironmentRequest {
   @JvmDefault
   fun duplicate(): TargetEnvironmentRequest = throw UnsupportedOperationException()
 
+  var projectPathOnTarget: String;
+
   /**
    * Every target must support at least one non-configurable upload-only "default" volume, which may be used by the run configurations
    * as a last resort for ungrouped file uploads.
@@ -88,7 +90,7 @@ interface TargetEnvironmentRequest {
    * As soon as target will be prepared, the value will also contain the port on local machine
    * that corresponds to the targetPort on target machine.
    */
-  @Deprecated("Use targetPortForwardings")
+  @Deprecated("Use targetPortBindings")
   fun bindTargetPort(targetPort: Int): TargetValue<Int>
 
   /**
@@ -98,7 +100,7 @@ interface TargetEnvironmentRequest {
    * The returned value contains the host and the port, which the target
    * process should connect to to access the local service.
    */
-  @Deprecated("Use localPortForwardings")
+  @Deprecated("Use localPortBindings")
   fun bindLocalPort(localPort: Int): TargetValue<HostPort>
 
   @Deprecated("Use TargetEnvironment.UploadVolume")

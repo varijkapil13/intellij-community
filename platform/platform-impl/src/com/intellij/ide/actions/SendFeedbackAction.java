@@ -12,9 +12,9 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.LicensingFacade;
+import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.io.URLUtil;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -70,13 +70,6 @@ public class SendFeedbackAction extends AnAction implements DumbAware {
     BrowserUtil.browse(url, project);
   }
 
-  /** @deprecated use {@link #getDescription(Project)} instead */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  public static @NotNull String getDescription() {
-    return getDescription(null);
-  }
-
   public static @NotNull String getDescription(@Nullable Project project) {
     @NonNls StringBuilder sb = new StringBuilder("\n\n");
     sb.append(ApplicationInfoEx.getInstanceEx().getBuild().asString()).append(", ");
@@ -111,8 +104,9 @@ public class SendFeedbackAction extends AnAction implements DumbAware {
       for (int i = 0; i < devices.length; i++) {
         if (i > 0) sb.append(", ");
         GraphicsDevice device = devices[i];
-        Rectangle bounds = device.getDefaultConfiguration().getBounds();
-        sb.append(bounds.width).append("x").append(bounds.height);
+        DisplayMode displayMode = device.getDisplayMode();
+        float scale = JBUIScale.sysScale(device.getDefaultConfiguration());
+        sb.append(displayMode.getWidth() * scale).append("x").append(displayMode.getHeight() * scale);
       }
       if (UIUtil.isRetina()) {
         sb.append(SystemInfo.isMac ? "; Retina" : "; HiDPI");

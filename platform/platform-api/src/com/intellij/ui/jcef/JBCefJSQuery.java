@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui.jcef;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
 import org.cef.CefClient;
 import org.cef.browser.CefBrowser;
@@ -27,9 +28,9 @@ public final class JBCefJSQuery implements JBCefDisposable {
   @NotNull private final CefClient myCefClient;
   @NotNull private final DisposeHelper myDisposeHelper = new DisposeHelper();
 
-  @NotNull private final Map<Function<String, Response>, CefMessageRouterHandler> myHandlerMap = Collections.synchronizedMap(new HashMap<>());
+  @NotNull private final Map<Function<? super String, ? extends Response>, CefMessageRouterHandler> myHandlerMap = Collections.synchronizedMap(new HashMap<>());
 
-  private JBCefJSQuery(@NotNull JBCefBrowser browser, @NotNull JBCefJSQuery.JSQueryFunc func) {
+  private JBCefJSQuery(@NotNull JBCefBrowserBase browser, @NotNull JBCefJSQuery.JSQueryFunc func) {
     myFunc = func;
     myCefClient = browser.getJBCefClient().getCefClient();
     Disposer.register(browser.getJBCefClient(), this);
@@ -46,10 +47,10 @@ public final class JBCefJSQuery implements JBCefDisposable {
   /**
    * Creates a unique JS query.
    *
-   * @see JBCefClient#JBCEFCLIENT_JSQUERY_POOL_SIZE_PROP
+   * @see JBCefClient.Properties#JS_QUERY_POOL_SIZE
    * @param browser the associated cef browser
    */
-  public static JBCefJSQuery create(@NotNull JBCefBrowser browser) {
+  public static JBCefJSQuery create(@NotNull JBCefBrowserBase browser) {
     Function<Void, JBCefJSQuery> create = (v) -> {
       return new JBCefJSQuery(browser, new JSQueryFunc(browser.getJBCefClient()));
     };
@@ -61,8 +62,19 @@ public final class JBCefJSQuery implements JBCefDisposable {
     if (pool != null && (slot = pool.getFreeSlot()) != null) {
       return new JBCefJSQuery(browser, slot);
     }
-    // this query will produce en error in JS debug console
+    Logger.getInstance(JBCefJSQuery.class).
+      warn("Set the property JBCefClient.Properties.JS_QUERY_POOL_SIZE to use JBCefJSQuery after the browser has been created",
+            new IllegalStateException());
+    // this query will produce en error in JS debug console like: "Uncaught TypeError: window.cefQuery_0123456789_1 is not a function"
     return create.apply(null);
+  }
+
+  /**
+   * @deprecated use {@link #create(JBCefBrowserBase)}
+   */
+  @Deprecated
+  public static JBCefJSQuery create(@NotNull JBCefBrowser browser) {
+    return create((JBCefBrowserBase)browser);
   }
 
   /**
@@ -90,7 +102,7 @@ public final class JBCefJSQuery implements JBCefDisposable {
            "});";
   }
 
-  public void addHandler(@NotNull Function<String, Response> handler) {
+  public void addHandler(@NotNull Function<? super String, ? extends Response> handler) {
     CefMessageRouterHandler cefHandler;
     myFunc.myRouter.addHandler(cefHandler = new CefMessageRouterHandlerAdapter() {
       @Override
@@ -117,7 +129,7 @@ public final class JBCefJSQuery implements JBCefDisposable {
     myHandlerMap.put(handler, cefHandler);
   }
 
-  public void removeHandler(@NotNull Function<String, Response> handler) {
+  public void removeHandler(@NotNull Function<? super String, ? extends Response> handler) {
     CefMessageRouterHandler cefHandler = myHandlerMap.remove(handler);
     if (cefHandler != null) {
       myFunc.myRouter.removeHandler(cefHandler);

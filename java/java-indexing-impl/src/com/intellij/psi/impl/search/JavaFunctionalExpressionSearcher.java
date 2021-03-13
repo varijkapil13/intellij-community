@@ -81,6 +81,7 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
       if (InjectedLanguageManager.getInstance(project).isInjectedFragment(aClass.getContainingFile()) || !hasJava8Modules(project)) {
         return;
       }
+      PsiSearchHelper psiSearchHelper = PsiSearchHelper.getInstance(project);
 
       Set<PsiClass> visited = new HashSet<>();
       processSubInterfaces(aClass, visited);
@@ -90,7 +91,7 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
           PsiType samType = saMethod.getReturnType();
           if (samType == null) continue;
 
-          SearchScope scope = samClass.getUseScope().intersectWith(session.scope);
+          SearchScope scope = psiSearchHelper.getUseScope(samClass).intersectWith(session.scope);
           descriptors.add(new SamDescriptor(samClass, saMethod, samType, GlobalSearchScopeUtil.toGlobalSearchScope(scope, project)));
         }
       }
@@ -111,7 +112,7 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
     MultiMap<VirtualFile, FunExprOccurrence> result = MultiMap.createLinkedSet();
     descriptors.get(0).dumbService.runReadActionInSmartMode(() -> {
       for (SamDescriptor descriptor : descriptors) {
-        GlobalSearchScope scope = new JavaSourceFilterScope(descriptor.effectiveUseScope);
+        GlobalSearchScope scope = new JavaSourceFilterScope(descriptor.effectiveUseScope, false, true);
         for (FunctionalExpressionKey key : descriptor.keys) {
           FileBasedIndex.getInstance().processValues(JavaFunctionalExpressionIndex.INDEX_ID, key, null, (file, infos) -> {
             result.putValues(file, ContainerUtil.map(infos, entry -> entry.occurrence));
@@ -258,7 +259,7 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
       if (psi == null) {
         StubTextInconsistencyException.checkStubTextConsistency(file);
         throw new RuntimeExceptionWithAttachments(
-          "No functional expression at " + entry + ", file will be indexed",
+          "No functional expression at " + entry + ", file will be reindexed",
           new Attachment(viewProvider.getVirtualFile().getPath(), viewProvider.getContents().toString()));
       }
       return psi;
@@ -275,7 +276,14 @@ public final class JavaFunctionalExpressionSearcher extends QueryExecutorBase<Ps
 
   private static PsiFile createMemberCopyFromText(@NotNull PsiMember member, @NotNull TextRange memberRange) {
     PsiFile file = member.getContainingFile();
-    String contextText = memberRange.subSequence(file.getViewProvider().getContents()).toString();
+    CharSequence contents = file.getViewProvider().getContents();
+    if (memberRange.getEndOffset() > contents.length()) {
+      StubTextInconsistencyException.checkStubTextConsistency(file);
+      throw new RuntimeExceptionWithAttachments(
+        "Range from the index " + memberRange + " exceeds the actual file length " + contents.length() + ", file will be reindexed",
+        new Attachment(file.getVirtualFile().getPath(), contents.toString()));
+    }
+    String contextText = memberRange.subSequence(contents).toString();
     Project project = file.getProject();
     return member instanceof PsiEnumConstant
            ? PsiElementFactory.getInstance(project).createEnumConstantFromText(contextText, member).getContainingFile()

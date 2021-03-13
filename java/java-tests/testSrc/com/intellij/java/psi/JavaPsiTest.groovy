@@ -10,6 +10,7 @@ import com.intellij.psi.*
 import com.intellij.psi.impl.light.LightRecordMethod
 import com.intellij.psi.impl.source.PsiClassReferenceType
 import com.intellij.psi.impl.source.PsiImmediateClassType
+import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
@@ -111,6 +112,16 @@ class JavaPsiTest extends LightJavaCodeInsightFixtureTestCase {
     PsiTestUtil.checkPsiMatchesTextIgnoringNonCode(file)
   }
 
+  void "test yield method is consistent"() {
+    def file = configureFile("class A{ void m() { Thread.yield();}}")
+    runCommand {
+      def statement = file.classes.first().methods.first().getBody().statements.first() as PsiExpressionStatement
+      def reference = statement.expression as PsiMethodCallExpression
+      reference.methodExpression.qualifier.delete()
+    }
+    PsiTestUtil.checkPsiMatchesTextIgnoringNonCode(file)
+  }
+
   void testTextBlockLiteralValue() {
     def file = configureFile("""
         class C {
@@ -196,16 +207,6 @@ class JavaPsiTest extends LightJavaCodeInsightFixtureTestCase {
     assert 1 == clazz.methods.size() // only constructor
   }
 
-  void "test record has members in dumb mode"() {
-    DumbServiceImpl.getInstance(getProject()).runInDumbMode {
-      def clazz = configureFile("record A(@Foo A... i)").classes[0]
-      def methods = clazz.findMethodsByName("i")
-      assert 1 == methods.size()
-      def method = methods.first()
-      assert method instanceof LightRecordMethod
-    }
-  }
-
   void "test add record component"() {
     def clazz = configureFile("record A(String s)").classes[0]
     def factory = JavaPsiFacade.getElementFactory(project)
@@ -242,6 +243,21 @@ class JavaPsiTest extends LightJavaCodeInsightFixtureTestCase {
     withLanguageLevel(LanguageLevel.JDK_15_PREVIEW) {
       def clazz = configureFile("enum sealed {}").classes[0]
       assert !clazz.getAllMethods().any { it.name == "values" }
+    }
+  }
+
+
+  void "test instanceof annotation and modifiers"() {
+    withLanguageLevel(LanguageLevel.JDK_16_PREVIEW) {
+      def statement = (PsiExpressionStatement)PsiElementFactory.getInstance(project)
+        .createStatementFromText("a instanceof @Ann final Foo f", null)
+      def variable = PsiTreeUtil.findChildOfType(statement, PsiPatternVariable.class)
+      assertNotNull(variable)
+      assertTrue(variable.hasModifierProperty(PsiModifier.FINAL))
+      def annotations = variable.getAnnotations()
+      assertEquals(1, annotations.size())
+      def annotation = annotations.first()
+      assertEquals("Ann", annotation.nameReferenceElement.referenceName)
     }
   }
 

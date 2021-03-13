@@ -23,7 +23,7 @@ import com.intellij.util.IncorrectOperationException
  */
 class JavaFormatterTest : AbstractJavaFormatterTest() {
   override fun getProjectDescriptor(): LightProjectDescriptor {
-    return LightJavaCodeInsightFixtureTestCase.JAVA_14
+    return LightJavaCodeInsightFixtureTestCase.JAVA_15
   }
 
   fun testPaymentManager() {
@@ -1537,6 +1537,9 @@ class Test {
 
     doTextTest("/**\n" + " *\n" + " */\n" + "class Foo\n extends B\n{\n" + "}",
                "/**\n" + " *\n" + " */\n" + "class Foo\n        extends B\n" + "{\n" + "}")
+
+    doTextTest("/**\n" + " *\n" + " */\n" + "class Foo\n permits B\n{\n" + "}",
+               "/**\n" + " *\n" + " */\n" + "class Foo\n        permits B\n" + "{\n" + "}")
 
   }
 
@@ -4025,6 +4028,95 @@ public enum LevelCode {
             String commented = null;
         }
     }""".trimIndent()
+    )
+  }
+
+  fun testPermitsList() {
+    settings.ALIGN_MULTILINE_EXTENDS_LIST = true
+    doTextTest("sealed class A permits B, \n" + "C {}", "sealed class A permits B,\n" + "                       C {\n}")
+  }
+
+  fun testWrapPermitsList() {
+    settings.RIGHT_MARGIN = 50
+    settings.EXTENDS_LIST_WRAP = CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM
+    settings.EXTENDS_KEYWORD_WRAP = CommonCodeStyleSettings.WRAP_AS_NEEDED
+
+    doTextTest("sealed class ColtreDataProvider permits Provider, AgentEventListener, ParameterDataEventListener {\n}",
+               "sealed class ColtreDataProvider permits Provider,\n" +
+               "        AgentEventListener,\n" +
+               "        ParameterDataEventListener {\n}")
+  }
+
+
+  fun testPermitsListWithPrecedingGeneric() {
+    doTextTest("""
+      sealed class Simple permits B {
+      }
+
+      final class B extends Simple {
+      }
+    """.trimIndent(), """
+      sealed class Simple permits B {
+      }
+
+      final class B extends Simple {
+      }
+    """.trimIndent())
+  }
+
+  fun testIdea250114() {
+    doTextTest("""
+      @Deprecated // Comment
+      class Test {
+      }
+      """.trimIndent(),
+
+      """
+      @Deprecated // Comment
+      class Test {
+      }
+      """.trimIndent())
+  }
+
+  fun testIdea252167() {
+    doTextTest("""      
+      @Ann record R(String str) {
+      }
+      """.trimIndent(),
+
+      """
+      @Ann
+      record R(String str) {
+      }
+      """.trimIndent())
+  }
+
+  fun testIdea153525() {
+    settings.LAMBDA_BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE_SHIFTED;
+    doTextTest(
+      """
+      public class Test {
+      void foo () {
+          bar (event ->{for (Listener l : listeners) {
+            notify ();
+        }
+          });
+      }
+      }
+      """.trimIndent(),
+
+      """
+      public class Test {
+          void foo() {
+              bar(event ->
+                  {
+                  for (Listener l : listeners) {
+                      notify();
+                  }
+                  });
+          }
+      }
+      """.trimIndent()
     )
   }
 }

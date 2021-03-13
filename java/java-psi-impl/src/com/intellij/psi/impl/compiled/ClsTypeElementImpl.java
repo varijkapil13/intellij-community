@@ -1,34 +1,22 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.compiled;
 
-import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import com.intellij.openapi.util.AtomicNullableLazyValue;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.NullableLazyValue;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.impl.PsiJavaParserFacadeImpl;
+import com.intellij.psi.impl.cache.TypeAnnotationContainer;
 import com.intellij.psi.impl.cache.TypeInfo;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.impl.source.tree.TreeElement;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Objects;
 
 public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement {
@@ -68,13 +56,9 @@ public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement
         return calculateChild();
       }
     };
-    myCachedType = new AtomicNotNullLazyValue<PsiType>() {
-      @NotNull
-      @Override
-      protected PsiType compute() {
-        return calculateType();
-      }
-    };
+    myCachedType = NotNullLazyValue.atomicLazy(() -> {
+      return calculateType();
+    });
   }
 
   @Override
@@ -153,18 +137,56 @@ public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement
       return null;
     }
     if (isArray()) {
-      return myVariance == VARIANCE_NONE
-             ? new ClsTypeElementImpl(this, myTypeText.substring(0, myTypeText.length() - 2), myVariance,
-                                      myAnnotations.forArrayElement())
-             : new ClsTypeElementImpl(this, myTypeText, VARIANCE_NONE,
-                                      myAnnotations.forBound());
+      if (myVariance == VARIANCE_NONE) {
+        return getDeepestArrayElement();
+      }
+      return new ClsTypeElementImpl(this, myTypeText, VARIANCE_NONE, myAnnotations.forBound());
     }
     if (isVarArgs()) {
-      return new ClsTypeElementImpl(this, myTypeText.substring(0, myTypeText.length() - 3), myVariance,
-                                    myAnnotations.forArrayElement());
+      return getDeepestArrayElement();
     }
-    return myVariance == VARIANCE_INVARIANT ? null : 
+    return myVariance == VARIANCE_INVARIANT ? null :
            new ClsJavaCodeReferenceElementImpl(this, myTypeText, myVariance == VARIANCE_NONE ? myAnnotations : myAnnotations.forBound());
+  }
+
+  int getArrayDepth() {
+    boolean varArgs = isVarArgs();
+    if (!varArgs && !isArray()) return 0;
+    int bracketPos = myTypeText.length() - (varArgs ? 3 : 2);
+    int depth = 1;
+    while (bracketPos > 2 && myTypeText.startsWith("[]", bracketPos - 2)) {
+      bracketPos -= 2;
+      depth++;
+    }
+    return depth;
+  }
+
+  @NotNull
+  private ClsElementImpl getDeepestArrayElement() {
+    int depth = getArrayDepth();
+    int bracketPos = myTypeText.length() - depth * 2 - (isVarArgs() ? 1 : 0);
+    TypeAnnotationContainer container = myAnnotations;
+    for (int i = 0; i < depth; i++) {
+      container = container.forArrayElement();
+    }
+    return new ClsTypeElementImpl(this, myTypeText.substring(0, bracketPos), myVariance, container);
+  }
+
+  @NotNull
+  private PsiType createArrayType(PsiTypeElement deepestChild) {
+    int depth = getArrayDepth();
+    List<TypeAnnotationContainer> containers =
+      StreamEx.iterate(myAnnotations, TypeAnnotationContainer::forArrayElement).limit(depth).toList();
+    PsiType type = deepestChild.getType();
+    for (int i = depth - 1; i >= 0; i--) {
+      if (i == 0 && isVarArgs()) {
+        type = new PsiEllipsisType(type);
+      } else {
+        type = type.createArrayType();
+      }
+      type = type.annotate(containers.get(i).getProvider(this));
+    }
+    return type;
   }
 
   @NotNull
@@ -182,7 +204,7 @@ public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement
       if (isArray()) {
         switch (myVariance) {
           case VARIANCE_NONE:
-            return ((PsiTypeElement)childElement).getType().createArrayType();
+            return createArrayType((PsiTypeElement)childElement);
           case VARIANCE_EXTENDS:
             return PsiWildcardType.createExtends(getManager(), ((PsiTypeElement)childElement).getType());
           case VARIANCE_SUPER:
@@ -194,7 +216,7 @@ public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement
       }
       else {
         assert isVarArgs() : this;
-        return new PsiEllipsisType(((PsiTypeElement)childElement).getType());
+        return createArrayType((PsiTypeElement)childElement);
       }
     }
     if (childElement instanceof ClsJavaCodeReferenceElementImpl) {
@@ -245,7 +267,7 @@ public class ClsTypeElementImpl extends ClsElementImpl implements PsiTypeElement
 
   @Override
   public PsiAnnotation @NotNull [] getApplicableAnnotations() {
-    return getAnnotations();
+    return getType().getAnnotations();
   }
 
   @Override

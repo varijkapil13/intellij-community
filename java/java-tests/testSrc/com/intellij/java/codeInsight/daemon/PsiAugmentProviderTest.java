@@ -3,20 +3,19 @@ package com.intellij.java.codeInsight.daemon;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.psi.*;
 import com.intellij.psi.augment.PsiAugmentProvider;
 import com.intellij.psi.impl.light.LightFieldBuilder;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase;
 import com.intellij.util.ref.GCUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 public class PsiAugmentProviderTest extends LightJavaCodeInsightFixtureTestCase {
   private static final String AUGMENTED_FIELD = "augmented";
@@ -63,6 +62,44 @@ public class PsiAugmentProviderTest extends LightJavaCodeInsightFixtureTestCase 
     GCUtil.tryGcSoftlyReachableObjects();
 
     assertSame(field, psiClass.findFieldByName(AUGMENTED_FIELD, false));
+  }
+
+  public void testDoNotCacheInvalidAugmentedFields() {
+    PsiClass psiClass = myFixture.addClass("class C {}");
+
+    WriteCommandAction.runWriteCommandAction(getProject(), () -> {
+      PsiField field = psiClass.findFieldByName(AUGMENTED_FIELD, false);
+      assertTrue(field.isValid());
+
+      getPsiManager().dropPsiCaches();
+      assertFalse(field.isValid());
+
+      PsiUtilCore.ensureValid(psiClass.findFieldByName(AUGMENTED_FIELD, false));
+    });
+  }
+
+  public void testPassNameHintToAugmenter() {
+    PsiClass psiClass = myFixture.addClass("class C {}");
+
+    List<String> hints = new ArrayList<>();
+    PsiAugmentProvider.EP_NAME.getPoint().registerExtension(new PsiAugmentProvider() {
+      @Override
+      protected @NotNull <Psi extends PsiElement> List<Psi> getAugments(@NotNull PsiElement element,
+                                                                        @NotNull Class<Psi> type,
+                                                                        @Nullable String nameHint) {
+        if (element == psiClass) {
+          hints.add(nameHint);
+        }
+        return Collections.emptyList();
+      }
+    }, myFixture.getTestRootDisposable());
+
+    assertNotNull(psiClass.findFieldByName(AUGMENTED_FIELD, true));
+    assertNull(psiClass.findFieldByName("another", false));
+    assertSize(1, psiClass.getFields());
+    assertSize(2, psiClass.getAllFields());
+
+    assertOrderedEquals(hints, AUGMENTED_FIELD, "another", null);
   }
 
   private static class TestAugmentProvider extends PsiAugmentProvider {
@@ -113,9 +150,11 @@ public class PsiAugmentProviderTest extends LightJavaCodeInsightFixtureTestCase 
     protected @NotNull <Psi extends PsiElement> List<Psi> getAugments(@NotNull PsiElement element,
                                                                       @NotNull Class<Psi> type,
                                                                       @Nullable String nameHint) {
+      var manager = element.getManager();
+      var count = manager.getModificationTracker().getModificationCount();
       if (type.equals(PsiField.class)) {
         //noinspection unchecked
-        return (List<Psi>)Collections.singletonList(new LightFieldBuilder(element.getManager(), AUGMENTED_FIELD, PsiType.BOOLEAN) {
+        return (List<Psi>)Collections.singletonList(new LightFieldBuilder(manager, AUGMENTED_FIELD, PsiType.BOOLEAN) {
           @Override
           public int hashCode() {
             return 0;
@@ -124,6 +163,11 @@ public class PsiAugmentProviderTest extends LightJavaCodeInsightFixtureTestCase 
           @Override
           public boolean equals(Object obj) {
             return obj.getClass() == getClass();
+          }
+
+          @Override
+          public boolean isValid() {
+            return count == manager.getModificationTracker().getModificationCount();
           }
         });
       }

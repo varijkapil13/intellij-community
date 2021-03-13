@@ -1,31 +1,34 @@
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.plugins.pipelines.ui
 
-import com.intellij.space.messages.SpaceBundle
 import circlet.pipelines.DefaultDslFileName
-import circlet.pipelines.config.api.ScriptConfig
-import circlet.pipelines.config.api.ScriptStep
-import com.intellij.space.plugins.pipelines.services.SpaceKtsModelBuilder
-import com.intellij.space.plugins.pipelines.viewmodel.SpaceModelTreeNode
-import com.intellij.space.plugins.pipelines.viewmodel.ScriptState
-import com.intellij.space.utils.LifetimedDisposable
-import com.intellij.space.utils.LifetimedDisposableImpl
+import circlet.pipelines.config.idea.api.*
+import circlet.pipelines.config.idea.api.ProcessExecutable.*
+import circlet.pipelines.config.idea.api.ScriptStep.CompositeStep
+import circlet.pipelines.config.idea.api.ScriptStep.SimpleStep
 import com.intellij.icons.AllIcons
-import com.intellij.ide.BrowserUtil
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.util.PsiNavigationSupport
 import com.intellij.openapi.actionSystem.ActionToolbarPosition
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.wm.ToolWindow
+import com.intellij.space.messages.SpaceBundle
+import com.intellij.space.plugins.pipelines.services.SpaceKtsModelBuilder
+import com.intellij.space.plugins.pipelines.viewmodel.ScriptState
+import com.intellij.space.plugins.pipelines.viewmodel.SpaceModelTreeNode
+import com.intellij.space.utils.LifetimedDisposable
+import com.intellij.space.utils.LifetimedDisposableImpl
 import com.intellij.ui.DumbAwareActionButton
 import com.intellij.ui.ToggleActionButton
 import com.intellij.ui.ToolbarDecorator
+import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.Panel
-import com.intellij.ui.components.labels.LinkLabel
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBEmptyBorder
@@ -46,6 +49,9 @@ import javax.swing.JPanel
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreeSelectionModel
+import kotlin.reflect.full.isSubtypeOf
+import kotlin.reflect.jvm.javaType
+import kotlin.reflect.typeOf
 
 class SpaceToolWindowViewModel(val lifetime: Lifetime) {
   val taskIsRunning = mutableProperty(false)
@@ -53,8 +59,8 @@ class SpaceToolWindowViewModel(val lifetime: Lifetime) {
   val extendedViewModeEnabled = mutableProperty(true)
 }
 
+@Service
 class SpaceToolWindowService(val project: Project) : LifetimedDisposable by LifetimedDisposableImpl(), KLogging() {
-
   val modelBuilder = project.service<SpaceKtsModelBuilder>()
 
   val viewModel = SpaceToolWindowViewModel(lifetime)
@@ -140,20 +146,6 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
       }
     }
 
-    //        val runAction = object : DumbAwareActionButton(ExecutionBundle.message("run.configurable.display.name"), AllIcons.RunConfigurations.TestState.Run) {
-    //            override fun actionPerformed(e: AnActionEvent) {
-    //                if (modelBuilder.script.value?.state?.value == ScriptState.Building) {
-    //                    return
-    //                }
-    //                val selectedNode = viewModel.selectedNode.value ?: return
-    //                if (!selectedNode.isRunnable) {
-    //                    return
-    //                }
-    //                val taskName = selectedNode.userObject
-    //                CircletRunConfigurationUtils.run(taskName.toString(), project)
-    //            }
-    //        }
-
     val expandAllAction = object : DumbAwareActionButton(IdeBundle.message("action.expand.all"), AllIcons.Actions.Expandall) {
       override fun actionPerformed(e: AnActionEvent) {
         if (modelBuilder.script.value?.state?.value == ScriptState.Building) {
@@ -184,9 +176,7 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
 
     fun updateActionsIsEnabledStates() {
       val smthIsRunning = modelBuilder.script.value?.state?.value == ScriptState.Building || viewModel.taskIsRunning.value
-      val isSelectedNodeRunnable = viewModel.selectedNode.value?.isRunnable ?: false
       refreshAction.isEnabled = !smthIsRunning
-      //            runAction.isEnabled = !smthIsRunning && isSelectedNodeRunnable
     }
 
     viewModel.selectedNode.forEach(lifetime) {
@@ -217,7 +207,7 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
   }
 
   private fun resetNodes(root: DefaultMutableTreeNode,
-                         config: ScriptConfig?,
+                         config: IdeaScriptConfig?,
                          error: String?,
                          state: ScriptState,
                          extendedViewModeEnabled: Boolean) {
@@ -234,12 +224,12 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
       return
     }
 
-    val tasks = config.jobs
+    val jobs = config.jobs
     val targets = config.targets
     val pipelines = config.pipelines
 
     var jobsTypesCount = 0
-    if (tasks.any()) {
+    if (jobs.any()) {
       jobsTypesCount++
     }
     if (targets.any()) {
@@ -249,29 +239,11 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
       jobsTypesCount++
     }
     val shouldAddGroupingNodes = jobsTypesCount > 1
-    if (tasks.any()) {
-      val tasksCollectionNode = getGroupingNode(root, "tasks", shouldAddGroupingNodes)
-      config.jobs.forEach {
-        val taskNode = SpaceModelTreeNode(it.name, true)
-        if (extendedViewModeEnabled) {
-          val triggers = it.triggers
-          if (triggers.any()) {
-            val triggersNode = SpaceModelTreeNode("triggers")
-            triggers.forEach { trigger ->
-              triggersNode.add(SpaceModelTreeNode(trigger::class.java.simpleName))
-            }
-
-            taskNode.add(triggersNode)
-          }
-
-          val jobsNode = SpaceModelTreeNode("jobs")
-          it.steps.forEach {
-            jobsNode.add(it.traverseJobs())
-          }
-          taskNode.add(jobsNode)
-        }
-
-        tasksCollectionNode.add(taskNode)
+    if (jobs.any()) {
+      val jobsCollectionNode = getGroupingNode(root, "jobs", shouldAddGroupingNodes)
+      config.jobs.forEach { job ->
+        val jobNode = job.toTreeNode(showChildren = extendedViewModeEnabled)
+        jobsCollectionNode.add(jobNode)
       }
     }
 
@@ -294,7 +266,7 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
     infoText.alignmentX = Component.CENTER_ALIGNMENT
     panel.add(infoText)
 
-    val createDslLink = LinkLabel.create(SpaceBundle.message("kts.toolwindow.add.automation.script.link")) {
+    val createDslLink = ActionLink(SpaceBundle.message("kts.toolwindow.add.automation.script.link")) {
       val basePath = project.basePath
       if (basePath != null) {
         val baseDirFile = LocalFileSystem.getInstance().findFileByPath(basePath)
@@ -320,15 +292,6 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
     createDslLink.alignmentX = Component.CENTER_ALIGNMENT
     panel.add(createDslLink)
 
-    panel.add(JLabel(" ")) // just separator
-
-    val showHelpLink = LinkLabel.create(SpaceBundle.message("kts.toolwindow.help.link")) {
-      BrowserUtil.browse("https://jetbrains.team")
-    }
-    showHelpLink.icon = AllIcons.General.ContextHelp
-    showHelpLink.alignmentX = Component.CENTER_ALIGNMENT
-    panel.add(showHelpLink)
-
     val rootPanel = JPanel()
     rootPanel.layout = GridBagLayout()
     rootPanel.add(panel, GridBagConstraints())
@@ -346,42 +309,82 @@ class SpaceToolWindowService(val project: Project) : LifetimedDisposable by Life
   }
 }
 
-fun ScriptStep.traverseJobs(): SpaceModelTreeNode {
-  when (val job = this) {
-    is ScriptStep.CompositeStep -> {
-      val res = SpaceModelTreeNode(job::class.java.simpleName)
-      job.children.forEach {
-        val child = it.traverseJobs()
-        res.add(child)
-      }
-      return res
+private fun ScriptJob.toTreeNode(showChildren: Boolean) = SpaceModelTreeNode(name, true).apply {
+  if (showChildren) {
+    if (triggers.any()) {
+      add(triggers.toTreeNode())
     }
-
-    is ScriptStep.Process.Container -> {
-      val res = SpaceModelTreeNode("container: ${job.image}")
-      val execPrefix = "exec: "
-      val execNode = DefaultMutableTreeNode("exec:")
-      val exec = job.data.exec
-      when (exec) {
-        is ScriptStep.ProcessExecutable.ContainerExecutable.DefaultCommand -> {
-          execNode.userObject = execPrefix + "defaultCommand${exec.args.presentArgs()}"
-        }
-        is ScriptStep.ProcessExecutable.ContainerExecutable.OverrideEntryPoint -> {
-          execNode.userObject = execPrefix + "overrideEntryPoint: ${exec.entryPoint}${exec.args.presentArgs()}"
-        }
-        is ScriptStep.ProcessExecutable.KotlinScript -> {
-          execNode.userObject = execPrefix + "kts script"
-        }
-      }
-      res.add(execNode)
-      return res
-    }
-    is ScriptStep.Process.VM -> {
-      return SpaceModelTreeNode("vm: ${job.image}. VM is not implemented in UI yet")
-    }
+    add(steps.toTreeNode())
   }
 }
 
+private fun List<Trigger>.toTreeNode() = SpaceModelTreeNode("triggers").apply {
+  forEach { trigger ->
+    add(trigger.toTreeNode())
+  }
+}
+
+private fun Trigger.toTreeNode() = SpaceModelTreeNode(usefulSubTypeName() ?: "other trigger")
+
+private fun StepSequence.toTreeNode() = SpaceModelTreeNode("steps").apply {
+  forEach { step ->
+    add(step.toTreeNode())
+  }
+}
+
+private fun ScriptStep.toTreeNode(): SpaceModelTreeNode = when (val step = this) {
+  is CompositeStep -> SpaceModelTreeNode(step.treeNodeText).apply {
+    step.children.forEach { subStep ->
+      add(subStep.toTreeNode())
+    }
+  }
+  is SimpleStep.Process.Container -> SpaceModelTreeNode("container: ${step.image}").apply {
+    add(step.data.exec.toTreeNode())
+  }
+  is SimpleStep.DockerComposeStep -> SpaceModelTreeNode("compose: ${step.mainService}")
+  else -> SpaceModelTreeNode(step.usefulSubTypeName())
+}
+
+private val CompositeStep.treeNodeText: String get() = when(this) {
+  is CompositeStep.Fork -> "parallel"
+  is CompositeStep.Sequence -> "sequence"
+  else -> usefulSubTypeName() ?: "composite step"
+}
+
+private fun ProcessExecutable.toTreeNode() = DefaultMutableTreeNode(treeNodeText)
+
+private val ProcessExecutable.treeNodeText: String
+  get() = when (this) {
+    is ContainerExecutable.DefaultCommand -> "exec: defaultCommand${args.presentArgs()}"
+    is ContainerExecutable.OverrideEntryPoint -> "exec: overrideEntryPoint: $entryPoint${args.presentArgs()}"
+    is KotlinScript -> "exec: kts script"
+    is ShellScript -> "exec: shell script"
+    else -> "exec: ${usefulSubTypeName()}"
+  }
+
 private fun List<String>.presentArgs(): String {
   return if (this.any()) ". args: ${this.joinToString()}" else ""
+}
+
+/**
+ * Returns the name of this object's dynamic type (which is a subtype of its static type [T]).
+ * If this object is of an anonymous type, this method falls back to the name of the closest supertype of the runtime type of this object
+ * that implements/extends its static type [T].
+ * If this object is a direct anonymous implementation of the static type [T], this method returns `null` to allow other fallbacks.
+ *
+ * Most instances of the interfaces are anonymous classes at the moment in the space project.
+ * For instance, the [Trigger] interface may have subinterfaces that we don't know of at compile time here, but could be added in the
+ * future.
+ * Since the object is of an anonymous class, we should use the name of the closest supertype that implements [Trigger], e.g. GitPush.
+ */
+@OptIn(ExperimentalStdlibApi::class)
+private inline fun <reified T : Any> T.usefulSubTypeName(): String? {
+  val simpleClassName = this::class.simpleName
+  if (simpleClassName != null) { // false for anonymous classes
+    return simpleClassName
+  }
+  // There is always at least one supertype (T), because we know this is an anonymous class that is also an instance of T
+  val subTypeOfT = this::class.supertypes.first { it.isSubtypeOf(typeOf<T>()) }
+  val simpleSubtypeName = subTypeOfT.javaType.typeName.substringAfterLast('.')
+  return simpleSubtypeName.takeIf { it != T::class.simpleName }
 }

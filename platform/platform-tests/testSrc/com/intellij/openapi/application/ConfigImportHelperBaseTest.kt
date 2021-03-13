@@ -34,6 +34,5 @@ abstract class ConfigImportHelperBaseTest : BareTestFixtureTestCase() {
     Files.setLastModifiedTime(file, FileTime.fromMillis(lastModified))
   }
 
-  protected fun findConfigDirectories(newConfigPath: Path) = ConfigImportHelper.findConfigDirectories(newConfigPath).map { it.path }
-
+  protected fun findConfigDirectories(newConfigPath: Path): List<Path> = ConfigImportHelper.findConfigDirectories(newConfigPath).paths
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.gradle.issue.quickfix
 
 import com.intellij.build.SyncViewManager
@@ -6,7 +6,7 @@ import com.intellij.build.issue.BuildIssueQuickFix
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.ide.actions.RevealFileAction
 import com.intellij.ide.actions.ShowLogAction
-import com.intellij.openapi.actionSystem.DataProvider
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.externalSystem.issue.quickfix.ReimportQuickFix.Companion.requestImport
@@ -33,6 +33,7 @@ import org.jetbrains.plugins.gradle.issue.quickfix.GradleWrapperSettingsOpenQuic
 import org.jetbrains.plugins.gradle.service.task.GradleTaskManager
 import org.jetbrains.plugins.gradle.settings.DistributionType
 import org.jetbrains.plugins.gradle.settings.GradleSettings
+import org.jetbrains.plugins.gradle.util.GradleBundle
 import org.jetbrains.plugins.gradle.util.GradleConstants
 import org.jetbrains.plugins.gradle.util.GradleUtil
 import java.io.File
@@ -51,17 +52,17 @@ class GradleVersionQuickFix(private val projectPath: String,
 
   override val id: String = "fix_gradle_version_in_wrapper"
 
-  override fun runQuickFix(project: Project, dataProvider: DataProvider): CompletableFuture<*> {
+  override fun runQuickFix(project: Project, dataContext: DataContext): CompletableFuture<*> {
     return updateOrCreateWrapper()
       .exceptionally {
         LOG.warn(it)
-        val msg = "Unable to update wrapper files"
-        val notification = NotificationData(msg, "See IDE log for the details.\n" +
-                                                 "<a href=\"#open_log\">" + ShowLogAction.getActionName() + "</a>", WARNING, PROJECT_SYNC)
+        val title = GradleBundle.message("gradle.version.quick.fix.error")
+        val message = GradleBundle.message("gradle.version.quick.fix.error.description", ShowLogAction.getActionName())
+        val notification = NotificationData(title, message, WARNING, PROJECT_SYNC)
           .apply {
             isBalloonNotification = true
             balloonGroup = "Gradle Import"
-            setListener("#open_log") { _, _ -> RevealFileAction.openFile(File(PathManager.getLogPath(), "idea.log")) }
+            setListener("#open_log") { _, _ -> ShowLogAction.showLog() }
           }
         ExternalSystemNotificationManager.getInstance(project).showNotification(GradleConstants.SYSTEM_ID, notification)
         throw it
@@ -119,7 +120,7 @@ class GradleVersionQuickFix(private val projectPath: String,
 
     val gradleVmOptions = GradleSettings.getInstance(project).gradleVmOptions
     val settings = ExternalSystemTaskExecutionSettings()
-    settings.executionName = "Upgrade Gradle wrapper"
+    settings.executionName = GradleBundle.message("grable.execution.name.upgrade.wrapper")
     settings.externalProjectPath = projectPath
     settings.taskNames = listOf("wrapper")
     settings.vmOptions = gradleVmOptions

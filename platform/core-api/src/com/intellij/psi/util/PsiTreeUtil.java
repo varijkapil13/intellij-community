@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.util;
 
 import com.intellij.lang.ASTNode;
@@ -18,13 +18,15 @@ import com.intellij.psi.templateLanguages.OuterLanguageElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.TIntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
@@ -309,7 +311,9 @@ public class PsiTreeUtil {
   public static @NotNull <T extends PsiElement> Collection<T> findChildrenOfAnyType(@Nullable PsiElement element,
                                                                            boolean strict,
                                                                            Class<? extends T> @NotNull ... classes) {
-    if (element == null) return ContainerUtil.emptyList();
+    if (element == null) {
+      return Collections.emptyList();
+    }
 
     CollectElements<PsiElement> processor = new CollectElements<PsiElement>() {
       @Override
@@ -818,6 +822,28 @@ public class PsiTreeUtil {
   }
 
   /**
+   * Finds the closest element, skipping elements which match given predicate.
+   *
+   * @param element   element to start search from
+   * @param next      a function to obtain next element
+   * @param condition a predicate to test whether element should be skipped
+   */
+  @Contract("null, _, _ -> null")
+  public static @Nullable PsiElement skipMatching(@Nullable PsiElement element,
+                                                  @NotNull Function<@NotNull ? super PsiElement, @Nullable ? extends PsiElement> next,
+                                                  @NotNull Predicate<@NotNull ? super PsiElement> condition) {
+    if (element == null) {
+      return null;
+    }
+    for (PsiElement e = next.apply(element); e != null; e = next.apply(e)) {
+      if (!condition.test(e)) {
+        return e;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Finds the closest parent that is an instance of one of supplied classes. Traversal stops at {@link PsiFile} level.
    *
    * @param element element to start traversal from
@@ -931,6 +957,12 @@ public class PsiTreeUtil {
 
   public static void mark(@NotNull PsiElement element, @NotNull Object marker) {
     element.getNode().putCopyableUserData(MARKER, marker);
+  }
+
+  public static Object mark(@NotNull PsiElement element) {
+    Object mark = new Object();
+    mark(element, mark);
+    return mark;
   }
 
   public static @Nullable PsiElement releaseMark(@NotNull PsiElement root, @NotNull Object marker) {
@@ -1260,13 +1292,13 @@ public class PsiTreeUtil {
    * @param element an element to find
    * @param copy file that must be a copy of {@code element.getContainingFile()}
    * @return found element; null if input element is null
-   * @throws IllegalStateException if it's detected that the supplied file is not exact copy of original file. 
-   * The exception is thrown on a best-effort basis, so you cannot rely on it. 
+   * @throws IllegalStateException if it's detected that the supplied file is not exact copy of original file.
+   * The exception is thrown on a best-effort basis, so you cannot rely on it.
    */
   @Contract("null, _ -> null; !null, _ -> !null")
   public static <T extends PsiElement> T findSameElementInCopy(@Nullable T element, @NotNull PsiFile copy) throws IllegalStateException {
     if (element == null) return null;
-    TIntArrayList offsets = new TIntArrayList();
+    IntList offsets = new IntArrayList();
     PsiElement cur = element;
     while (!cur.getClass().equals(copy.getClass())) {
       int pos = 0;
@@ -1276,12 +1308,12 @@ public class PsiTreeUtil {
       offsets.add(pos);
       cur = cur.getParent();
       if (cur == null) {
-        throw new IllegalStateException("Cannot find parent file");
+        throw new IllegalStateException("Cannot find parent file; element class: " + element.getClass());
       }
     }
     cur = copy;
     for (int level = offsets.size() - 1; level >= 0; level--) {
-      int pos = offsets.get(level);
+      int pos = offsets.getInt(level);
       cur = cur.getFirstChild();
       if (cur == null) {
         throw new IllegalStateException("File structure differs: no child");
@@ -1299,7 +1331,7 @@ public class PsiTreeUtil {
     //noinspection unchecked
     return (T)cur;
   }
-  
+
   //<editor-fold desc="Deprecated stuff.">
   /** @deprecated use {@link SyntaxTraverser#psiTraverser()} */
   @Deprecated

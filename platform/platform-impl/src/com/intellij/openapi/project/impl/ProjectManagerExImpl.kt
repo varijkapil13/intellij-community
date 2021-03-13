@@ -1,7 +1,6 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.project.impl
 
-import com.intellij.configurationStore.runInAutoSaveDisabledMode
 import com.intellij.conversion.ConversionResult
 import com.intellij.conversion.ConversionService
 import com.intellij.diagnostic.ActivityCategory
@@ -11,8 +10,10 @@ import com.intellij.featureStatistics.fusCollectors.LifecycleUsageTriggerCollect
 import com.intellij.ide.AppLifecycleListener
 import com.intellij.ide.GeneralSettings
 import com.intellij.ide.IdeEventQueue
+import com.intellij.ide.SaveAndSyncHandler
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
+import com.intellij.ide.impl.setTrusted
 import com.intellij.ide.lightEdit.LightEditCompatible
 import com.intellij.ide.startup.impl.StartupManagerImpl
 import com.intellij.openapi.application.ApplicationManager
@@ -26,8 +27,10 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.project.getProjectDataPathRoot
 import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.wm.IdeFocusManager
@@ -44,6 +47,9 @@ import org.jetbrains.annotations.ApiStatus
 import java.awt.event.InvocationEvent
 import java.io.IOException
 import java.nio.file.*
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import java.util.function.BiFunction
 
 @ApiStatus.Internal
 open class ProjectManagerExImpl : ProjectManagerImpl() {
@@ -62,13 +68,17 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
   }
 
   final override fun openProject(projectStoreBaseDir: Path, options: OpenProjectTask): Project? {
+    return openProjectAsync(projectStoreBaseDir, options).get(30, TimeUnit.MINUTES)
+  }
+
+  final override fun openProjectAsync(projectStoreBaseDir: Path, options: OpenProjectTask): CompletableFuture<Project?> {
     val app = ApplicationManager.getApplication()
     if (LOG.isDebugEnabled && !app.isUnitTestMode) {
       LOG.debug("open project: $options", Exception())
     }
 
     if (options.project != null && isProjectOpened(options.project)) {
-      return null
+      return CompletableFuture.completedFuture(null)
     }
 
     val activity = StartUpMeasurer.startMainActivity("project opening preparation")
@@ -87,48 +97,54 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
         // this null assertion is required to overcome bug in new version of KT compiler: KT-40034
         @Suppress("UNNECESSARY_NOT_NULL_ASSERTION")
         if (checkExistingProjectOnOpen(projectToClose!!, options.callback, projectStoreBaseDir, this)) {
-          return null
+          return CompletableFuture.completedFuture(null)
         }
       }
     }
 
     val frameAllocator = if (app.isHeadlessEnvironment) ProjectFrameAllocator(options) else ProjectUiFrameAllocator(options, projectStoreBaseDir)
-    val result = runInAutoSaveDisabledMode {
-      frameAllocator.run {
-        activity.end()
-        val result: PrepareProjectResult
-        if (options.project == null) {
-          result = prepareProject(options, projectStoreBaseDir) ?: return@run null
+    val disableAutoSaveToken = SaveAndSyncHandler.getInstance().disableAutoSave()
+    return frameAllocator.run {
+      activity.end()
+      val result: PrepareProjectResult
+      if (options.project == null) {
+        result = prepareProject(options, projectStoreBaseDir) ?: return@run null
+      }
+      else {
+        result = PrepareProjectResult(options.project, null)
+      }
+
+      val project = result.project
+      frameAllocator.projectLoaded(project)
+      if (doOpenProject(project)) {
+        frameAllocator.projectOpened(project)
+        result
+      }
+      else {
+        null
+      }
+    }
+      .handle(BiFunction { result, error ->
+        disableAutoSaveToken.finish()
+
+        if (error != null) {
+          throw error
         }
-        else {
-          result = PrepareProjectResult(options.project, null)
+
+        if (result == null) {
+          frameAllocator.projectNotLoaded(error = null)
+          if (options.showWelcomeScreen) {
+            WelcomeFrame.showIfNoProjectOpened()
+          }
+          return@BiFunction null
         }
 
         val project = result.project
-        frameAllocator.projectLoaded(project)
-        if (doOpenProject(project)) {
-          frameAllocator.projectOpened(project)
-          result
+        if (options.callback != null) {
+          options.callback!!.projectOpened(project, result.module ?: ModuleManager.getInstance(project).modules[0])
         }
-        else {
-          null
-        }
-      }
-    }
-
-    if (result == null) {
-      frameAllocator.projectNotLoaded(error = null)
-      if (options.showWelcomeScreen) {
-        WelcomeFrame.showIfNoProjectOpened()
-      }
-      return null
-    }
-
-    val project = result.project
-    if (options.callback != null) {
-      options.callback!!.projectOpened(project, result.module ?: ModuleManager.getInstance(project).modules[0])
-    }
-    return project
+        project
+      })
   }
 
   override fun openProject(project: Project): Boolean {
@@ -171,13 +187,14 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
   }
 
   override fun newProject(projectFile: Path, options: OpenProjectTask): Project? {
-    removeProjectDirContentOrFile(projectFile)
+    removeProjectConfigurationAndCaches(projectFile)
 
     val project = instantiateProject(projectFile, options)
     try {
       val template = if (options.useDefaultProjectAsTemplate) defaultProject else null
       initProject(projectFile, project, options.isRefreshVfsNeeded, options.preloadServices, template,
                   ProgressManager.getInstance().progressIndicator)
+      project.setTrusted(true)
       return project
     }
     catch (t: Throwable) {
@@ -212,7 +229,7 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
     val project: Project?
     val indicator = ProgressManager.getInstance().progressIndicator
     if (options.isNewProject) {
-      removeProjectDirContentOrFile(projectStoreBaseDir)
+      removeProjectConfigurationAndCaches(projectStoreBaseDir)
       project = instantiateProject(projectStoreBaseDir, options)
       val template = if (options.useDefaultProjectAsTemplate) defaultProject else null
       initProject(projectStoreBaseDir, project, options.isRefreshVfsNeeded, options.preloadServices, template, indicator)
@@ -262,6 +279,7 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
   protected open fun isRunStartUpActivitiesEnabled(project: Project): Boolean = true
 }
 
+@NlsSafe
 private fun message(e: Throwable): String {
   var message = e.message ?: e.localizedMessage
   if (message != null) {
@@ -277,54 +295,71 @@ private fun checkExistingProjectOnOpen(projectToClose: Project,
                                        callback: ProjectOpenedCallback?,
                                        projectDir: Path?,
                                        projectManager: ProjectManagerExImpl): Boolean {
+  val result = CompletableFuture<Boolean>()
+
   val settings = GeneralSettings.getInstance()
   val isValidProject = projectDir != null && ProjectUtil.isValidProjectPath(projectDir)
-  if (projectDir != null && ProjectAttachProcessor.canAttachToProject() &&
-      (!isValidProject || settings.confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK)) {
-    val exitCode = ProjectUtil.confirmOpenOrAttachProject()
-    if (exitCode == -1) {
-      return true
-    }
-    else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
-      if (!projectManager.closeAndDispose(projectToClose)) {
-        return true
+
+  ApplicationManager.getApplication().invokeAndWait{
+    try {
+      if (projectDir != null && ProjectAttachProcessor.canAttachToProject() &&
+          (!isValidProject || settings.confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK)) {
+        val exitCode = ProjectUtil.confirmOpenOrAttachProject()
+        if (exitCode == -1) {
+          result.complete(true)
+          return@invokeAndWait
+        }
+        else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
+          if (!projectManager.closeAndDispose(projectToClose)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH) {
+          if (PlatformProjectOpenProcessor.attachToProject(projectToClose, projectDir, callback)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        // process all pending events that can interrupt focus flow
+        // todo this can be removed after taming the focus beast
+        IdeEventQueue.getInstance().flushQueue()
       }
-    }
-    else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH) {
-      if (PlatformProjectOpenProcessor.attachToProject(projectToClose, projectDir, callback)) {
-        return true
+      else {
+        val exitCode = ProjectUtil.confirmOpenNewProject(false)
+        if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
+          if (!projectManager.closeAndDispose(projectToClose)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        else if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
+          // not in a new window
+          result.complete(true)
+          return@invokeAndWait
+        }
       }
+
+      result.complete(false)
+    } catch (err: Throwable) {
+      result.completeExceptionally(err)
     }
-    // process all pending events that can interrupt focus flow
-    // todo this can be removed after taming the focus beast
-    IdeEventQueue.getInstance().flushQueue()
   }
-  else {
-    val exitCode = ProjectUtil.confirmOpenNewProject(false)
-    if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
-      if (!projectManager.closeAndDispose(projectToClose)) {
-        return true
-      }
-    }
-    else if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
-      // not in a new window
-      return true
-    }
-  }
-  return false
+
+  return result.get()
 }
 
 private fun openProject(project: Project, indicator: ProgressIndicator?, runStartUpActivities: Boolean) {
   val waitEdtActivity = StartUpMeasurer.startMainActivity("placing calling projectOpened on event queue")
   if (indicator != null) {
-    indicator.text = if (ApplicationManager.getApplication().isInternal) "Waiting on event queue..." else ProjectBundle.message(
-      "project.preparing.workspace")
+    indicator.text = if (ApplicationManager.getApplication().isInternal) "Waiting on event queue..."  // NON-NLS (internal mode)
+                     else ProjectBundle.message("project.preparing.workspace")
     indicator.isIndeterminate = true
   }
   ApplicationManager.getApplication().invokeAndWait {
     waitEdtActivity.end()
     if (indicator != null && ApplicationManager.getApplication().isInternal) {
-      indicator.text = "Running project opened tasks..."
+      indicator.text = "Running project opened tasks..."  // NON-NLS (internal mode)
     }
 
     ProjectManagerImpl.LOG.debug("projectOpened")
@@ -392,23 +427,24 @@ private fun toCanonicalName(filePath: String): Path {
   return file
 }
 
-private fun removeProjectDirContentOrFile(projectFile: Path) {
-  if (Files.isRegularFile(projectFile)) {
-    try {
+private fun removeProjectConfigurationAndCaches(projectFile: Path) {
+  try {
+    if (Files.isRegularFile(projectFile)) {
       Files.deleteIfExists(projectFile)
     }
-    catch (ignored: IOException) {
-    }
-  }
-  else {
-    try {
+    else {
       Files.newDirectoryStream(projectFile.resolve(Project.DIRECTORY_STORE_FOLDER)).use { directoryStream ->
         for (file in directoryStream) {
           file!!.delete()
         }
       }
     }
-    catch (ignore: IOException) {
-    }
+  }
+  catch (ignored: IOException) {
+  }
+  try {
+    getProjectDataPathRoot(projectFile).delete()
+  }
+  catch (ignored: IOException) {
   }
 }

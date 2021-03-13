@@ -1,3 +1,4 @@
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.messages;
 
 import com.intellij.DynamicBundle;
@@ -9,7 +10,7 @@ import org.jetbrains.annotations.PropertyKey;
 import java.util.function.Supplier;
 
 public class SpaceBundle extends DynamicBundle {
-  @NonNls private static final String BUNDLE = "messages.SpaceBundle";
+  @NonNls public static final String BUNDLE = "messages.SpaceBundle";
   private static final SpaceBundle INSTANCE = new SpaceBundle();
 
   private SpaceBundle() {

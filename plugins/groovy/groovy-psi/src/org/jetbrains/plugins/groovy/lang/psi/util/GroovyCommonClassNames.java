@@ -29,8 +29,11 @@ public interface GroovyCommonClassNames {
   String JAVA_UTIL_REGEX_MATCHER = "java.util.regex.Matcher";
   String GROOVY_TRANSFORM_FIELD = "groovy.transform.Field";
   String GROOVY_TRANSFORM_TUPLE_CONSTRUCTOR = "groovy.transform.TupleConstructor";
+  String GROOVY_TRANSFORM_MAP_CONSTRUCTOR = "groovy.transform.MapConstructor";
+  String GROOVY_TRANSFORM_PROPERTY_OPTIONS = "groovy.transform.PropertyOptions";
   String GROOVY_TRANSFORM_IMMUTABLE = "groovy.transform.Immutable";
   String GROOVY_TRANSFORM_CANONICAL = "groovy.transform.Canonical";
+  String GROOVY_TRANSFORM_AUTO_FINAL = "groovy.transform.AutoFinal";
   String GROOVY_LANG_REFERENCE = "groovy.lang.Reference";
   String JAVA_UTIL_LINKED_HASH_MAP = "java.util.LinkedHashMap";
   String GROOVY_TRANSFORM_AUTO_EXTERNALIZE = "groovy.transform.AutoExternalize";

@@ -8,6 +8,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VFileProperty;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFilePointerCapableFileSystem;
 import com.intellij.openapi.vfs.newvfs.ManagingFS;
@@ -16,7 +17,6 @@ import com.intellij.openapi.vfs.newvfs.RefreshQueue;
 import com.intellij.openapi.vfs.newvfs.VfsImplUtil;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.PathUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.*;
@@ -24,19 +24,30 @@ import org.jetbrains.annotations.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-public final class LocalFileSystemImpl extends LocalFileSystemBase implements Disposable, VirtualFilePointerCapableFileSystem {
+public class LocalFileSystemImpl extends LocalFileSystemBase implements Disposable, VirtualFilePointerCapableFileSystem {
   private static final int STATUS_UPDATE_PERIOD = 1000;
 
   private final ManagingFS myManagingFS;
   private final FileWatcher myWatcher;
   private final WatchRootsManager myWatchRootsManager;
+  private final Runnable myAfterMarkDirtyCallback;
   private volatile boolean myDisposed;
 
   public LocalFileSystemImpl() {
+    this(null);
+  }
+
+  public LocalFileSystemImpl(@Nullable Runnable afterMarkDirtyCallback) {
+    myAfterMarkDirtyCallback = afterMarkDirtyCallback;
     myManagingFS = ManagingFS.getInstance();
     myWatcher = new FileWatcher(myManagingFS, () -> {
-      AppExecutorUtil.getAppScheduledExecutorService().scheduleWithFixedDelay(
-        () -> { if (!ApplicationManager.getApplication().isDisposed()) storeRefreshStatusToFiles(); },
+      AppExecutorUtil.getAppScheduledExecutorService().scheduleWithFixedDelay(() -> {
+          if (!ApplicationManager.getApplication().isDisposed()) {
+            if (storeRefreshStatusToFiles() && myAfterMarkDirtyCallback != null) {
+              myAfterMarkDirtyCallback.run();
+            }
+          }
+        },
         STATUS_UPDATE_PERIOD, STATUS_UPDATE_PERIOD, TimeUnit.MILLISECONDS);
     });
     myWatchRootsManager = new WatchRootsManager(myWatcher, this);
@@ -55,13 +66,15 @@ public final class LocalFileSystemImpl extends LocalFileSystemBase implements Di
     myWatcher.dispose();
   }
 
-  private void storeRefreshStatusToFiles() {
+  private boolean storeRefreshStatusToFiles() {
     if (myWatcher.isOperational()) {
       FileWatcher.DirtyPaths dirtyPaths = myWatcher.getDirtyPaths();
       markPathsDirty(dirtyPaths.dirtyPaths);
       markFlatDirsDirty(dirtyPaths.dirtyDirectories);
       markRecursiveDirsDirty(dirtyPaths.dirtyPathsRecursive);
+      return !dirtyPaths.dirtyPaths.isEmpty() || !dirtyPaths.dirtyDirectories.isEmpty() || !dirtyPaths.dirtyPathsRecursive.isEmpty();
     }
+    return false;
   }
 
   private void markPathsDirty(@NotNull Iterable<String> dirtyPaths) {
@@ -206,7 +219,7 @@ public final class LocalFileSystemImpl extends LocalFileSystemBase implements Di
     // check if it's circular - any symlink above resolves to my target too
     for (VirtualFileSystemEntry p = (VirtualFileSystemEntry)parent; p != null; p = p.getParent()) {
       // optimization: when the file has no symlinks up the hierarchy, it's not circular
-      if (!p.hasSymlink()) return false;
+      if (!p.thisOrParentHaveSymlink()) return false;
       if (p.is(VFileProperty.SYMLINK)) {
         String parentResolved = p.getCanonicalPath();
         if (symlinkTarget.equals(parentResolved)) {
@@ -222,7 +235,7 @@ public final class LocalFileSystemImpl extends LocalFileSystemBase implements Di
                                     @NotNull String symlinkTarget) {
     if (parent != null) {
       String symlinkTargetParent = StringUtil.trimEnd(symlinkTarget, "/" + name);
-      return PathUtil.isAncestorOrSelf(symlinkTargetParent, parent);
+      return VfsUtilCore.isAncestorOrSelf(symlinkTargetParent, parent);
     }
     // parent == null means name is root
     return FileUtil.PATH_CHAR_SEQUENCE_HASHING_STRATEGY.equals(name, symlinkTarget);

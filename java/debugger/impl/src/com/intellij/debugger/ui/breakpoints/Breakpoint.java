@@ -57,6 +57,7 @@ import com.sun.jdi.event.LocatableEvent;
 import com.sun.jdi.request.EventRequest;
 import one.util.streamex.StreamEx;
 import org.jdom.Element;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -73,6 +74,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   private static final Key<Long> HIT_COUNTER = Key.create("HIT_COUNTER");
 
   final XBreakpoint<P> myXBreakpoint;
+  @NotNull
   protected final Project myProject;
 
   @NonNls private static final String LOG_MESSAGE_OPTION_NAME = "LOG_MESSAGE";
@@ -194,7 +196,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   /**
    * returns UI representation
    */
-  public abstract String getEventMessage(LocatableEvent event);
+  public abstract @Nls String getEventMessage(LocatableEvent event);
 
   protected String getStackTrace(SuspendContextImpl suspendContext) {
     StringBuilder builder = new StringBuilder(JavaDebuggerBundle.message("status.line.breakpoint.reached.full.trace"));

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.application.options;
 
 import com.intellij.application.options.codeStyle.CodeStyleSchemesModel;
@@ -23,13 +23,17 @@ import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.ui.OnePixelDivider;
+import com.intellij.openapi.util.NlsContexts.TabTitle;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
-import com.intellij.psi.codeStyle.*;
+import com.intellij.psi.codeStyle.CodeStyleManager;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
+import com.intellij.psi.codeStyle.PredefinedCodeStyle;
 import com.intellij.ui.UserActivityWatcher;
 import com.intellij.ui.tabs.JBTabs;
 import com.intellij.ui.tabs.impl.TabLabel;
@@ -37,7 +41,9 @@ import com.intellij.util.Alarm;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.LocalTimeCounter;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.ui.PresentableEnumUtil;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -57,7 +63,6 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHighlightingListener {
-
   private static final long TIME_TO_HIGHLIGHT_PREVIEW_CHANGES_IN_MILLIS = TimeUnit.SECONDS.toMillis(3);
 
   private static final Logger LOG = Logger.getInstance(CodeStyleAbstractPanel.class);
@@ -67,8 +72,6 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
   private final EditorEx myEditor;
   private final CodeStyleSettings mySettings;
   private boolean myShouldUpdatePreview;
-  protected static final int[] ourWrappings =
-    {CommonCodeStyleSettings.DO_NOT_WRAP, CommonCodeStyleSettings.WRAP_AS_NEEDED, CommonCodeStyleSettings.WRAP_ON_EVERY_ITEM, CommonCodeStyleSettings.WRAP_ALWAYS};
   private long myLastDocumentModificationStamp;
   private String myTextToReformat;
   private final UserActivityWatcher myUserActivityWatcher = new UserActivityWatcher();
@@ -82,6 +85,8 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
   private final CodeStyleSettings myCurrentSettings;
   private final Language myDefaultLanguage;
   private Document myDocumentBeforeChanges;
+
+  private @Nullable String myLastSearchString;
 
   protected CodeStyleAbstractPanel(@NotNull CodeStyleSettings settings) {
     this(null, null, settings);
@@ -295,6 +300,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
    * @see LanguageCodeStyleSettingsProvider#createFileFromText(Project, String)
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected PsiFile createFileFromText(Project project, String text) {
     Language language = getDefaultLanguage();
     if (language != null) {
@@ -384,15 +390,6 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
     }
   }
 
-  protected static int getIndexForWrapping(int value) {
-    for (int i = 0; i < ourWrappings.length; i++) {
-      int ourWrapping = ourWrappings[i];
-      if (ourWrapping == value) return i;
-    }
-    LOG.error("Invalid wrapping option index: " + value);
-    return 0;
-  }
-
   public abstract boolean isModified(CodeStyleSettings settings);
 
   @Nullable
@@ -408,12 +405,8 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
 
   protected abstract void resetImpl(final CodeStyleSettings settings);
 
-  @SuppressWarnings("unchecked")
-  protected static void fillWrappingCombo(@NotNull JComboBox wrapCombo) {
-    wrapCombo.addItem(ApplicationBundle.message("wrapping.do.not.wrap"));
-    wrapCombo.addItem(ApplicationBundle.message("wrapping.wrap.if.long"));
-    wrapCombo.addItem(ApplicationBundle.message("wrapping.chop.down.if.long"));
-    wrapCombo.addItem(ApplicationBundle.message("wrapping.wrap.always"));
+  protected static void fillWrappingCombo(@NotNull JComboBox<CodeStyleSettings.WrapStyle> wrapCombo) {
+    PresentableEnumUtil.fill(wrapCombo, CodeStyleSettings.WrapStyle.class);
   }
 
   public static String readFromFile(@NotNull Class<?> resourceContainerClass, @NonNls @NotNull String fileName) {
@@ -583,19 +576,21 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
     return myEditor;
   }
 
-  @NotNull
-  protected CodeStyleSettings getSettings() {
+  protected @NotNull CodeStyleSettings getSettings() {
     return mySettings;
   }
 
-  @NotNull
-  public Set<String> processListOptions() {
+  public @NotNull Set<String> processListOptions() {
     return Collections.emptySet();
   }
 
-  @NotNull
-  public OptionsContainingConfigurable getOptionIndexer() {
-    return () -> CodeStyleAbstractPanel.this.processListOptions();
+  public @NotNull OptionsContainingConfigurable getOptionIndexer() {
+    return new OptionsContainingConfigurable() {
+      @Override
+      public @NotNull Set<String> processListOptions() {
+        return CodeStyleAbstractPanel.this.processListOptions();
+      }
+    };
   }
 
   public final void applyPredefinedSettings(@NotNull PredefinedCodeStyle codeStyle) {
@@ -615,8 +610,8 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
     return myDefaultLanguage;
   }
 
-  protected String getTabTitle() {
-    return "Other";
+  protected @TabTitle @NotNull String getTabTitle() {
+    return ApplicationBundle.message("settings.code.style.tab.title.other");
   }
 
   protected CodeStyleSettings getCurrentSettings() {
@@ -640,7 +635,7 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
 
   @Override
   public final void highlight(@NotNull JComponent component, @NotNull String searchString) {
-    if (isInsideThisPanel(component)) {
+    if (isNewSearchString(searchString) && isInsideThisPanel(component)) {
       if (component instanceof TabLabel) {
         Container parent = component.getParent();
         if (parent instanceof JBTabs) {
@@ -658,6 +653,12 @@ public abstract class CodeStyleAbstractPanel implements Disposable, ComponentHig
         }
       }
     }
+  }
+
+  private boolean isNewSearchString(@NotNull String searchString) {
+    if (searchString.equals(myLastSearchString)) return false;
+    myLastSearchString = searchString;
+    return true;
   }
 
   public void highlightOptions(@NotNull String searchString) {

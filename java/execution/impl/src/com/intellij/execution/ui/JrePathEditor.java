@@ -1,10 +1,13 @@
 // Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.ui;
 
-import com.intellij.core.JavaPsiBundle;
 import com.intellij.execution.ExecutionBundle;
+import com.intellij.execution.target.TargetEnvironmentConfiguration;
+import com.intellij.execution.target.TargetEnvironmentsManager;
+import com.intellij.execution.target.java.JavaLanguageRuntimeConfiguration;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.BrowseFilesListener;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.impl.SdkVersionUtil;
@@ -21,9 +24,11 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.fields.ExtendableTextField;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.StatusText;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.java.JdkVersionDetector;
@@ -35,14 +40,16 @@ import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.io.File;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
-public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWithAnchor {
+public class JrePathEditor extends LabeledComponent<ComboBox<JrePathEditor.JreComboBoxItem>> implements PanelWithAnchor {
   private final JreComboboxEditor myComboboxEditor;
   private final DefaultJreItem myDefaultJreItem;
   private DefaultJreSelector myDefaultJreSelector;
   private final SortedComboBoxModel<JreComboBoxItem> myComboBoxModel;
   private String myPreviousCustomJrePath;
+  private boolean myRemoteTarget;
 
   public JrePathEditor(DefaultJreSelector defaultJreSelector) {
     this();
@@ -57,7 +64,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
   }
 
   public JrePathEditor(boolean editable) {
-    myComboBoxModel = new SortedComboBoxModel<JreComboBoxItem>((o1, o2) -> {
+    myComboBoxModel = new SortedComboBoxModel<>((o1, o2) -> {
       int result = Comparing.compare(o1.getOrder(), o2.getOrder());
       if (result != 0) {
         return result;
@@ -70,49 +77,18 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
           getComponent().hidePopup();
           getBrowseRunnable().run();
         }
-        else
+        else {
           super.setSelectedItem(anItem);
+        }
       }
     };
     myDefaultJreItem = new DefaultJreItem();
-    myComboBoxModel.add(myDefaultJreItem);
-    final Sdk[] allJDKs = ProjectJdkTable.getInstance().getAllJdks();
-    for (Sdk sdk : allJDKs) {
-      myComboBoxModel.add(new SdkAsJreItem(sdk));
-    }
-
-    final Set<String> jrePaths = new HashSet<>();
-    for (JreProvider provider : JreProvider.EP_NAME.getExtensionList()) {
-      if (provider.isAvailable()) {
-        String path = provider.getJrePath();
-        if (!StringUtil.isEmpty(path)) {
-          jrePaths.add(path);
-          myComboBoxModel.add(new CustomJreItem(path, provider.getPresentableName(), null));
-        }
-      }
-    }
-
-    for (Sdk jdk : allJDKs) {
-      String homePath = jdk.getHomePath();
-
-      if (!SystemInfo.isMac) {
-        final File jre = new File(jdk.getHomePath(), "jre");
-        if (jre.isDirectory()) {
-          homePath = jre.getPath();
-        }
-      }
-      if (jrePaths.add(homePath)) {
-        myComboBoxModel.add(new CustomJreItem(homePath, null, jdk.getVersionString()));
-      }
-    }
-    if (!editable) {
-      myComboBoxModel.add(new AddJreItem());
-    }
+    buildModel(editable);
     myComboBoxModel.setSelectedItem(myDefaultJreItem);
 
     ComboBox<JreComboBoxItem> comboBox = new ComboBox<>(myComboBoxModel);
     comboBox.setEditable(editable);
-    comboBox.setRenderer(new ColoredListCellRenderer<JreComboBoxItem>() {
+    comboBox.setRenderer(new ColoredListCellRenderer<>() {
       {
         setIpad(JBInsets.create(1, 0));
         setMyBorder(null);
@@ -152,7 +128,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
             }
           }
         });
-        field.setTextToTriggerEmptyTextStatus(JavaPsiBundle.message("default.jre.name"));
+        field.setTextToTriggerEmptyTextStatus(ExecutionBundle.message("default.jre.name"));
 
         return field;
       }
@@ -167,27 +143,88 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
     updateUI();
   }
 
+  /**
+   * @return true if selection update needed
+   */
+  public boolean updateModel(@NotNull Project project, @Nullable String targetName) {
+    myComboBoxModel.clear();
+    myRemoteTarget = false;
+    if (targetName != null) {
+      TargetEnvironmentConfiguration config = TargetEnvironmentsManager.getInstance(project).getTargets().findByName(targetName);
+      if (config != null) {
+        myRemoteTarget = true;
+        List<CustomJreItem> items = ContainerUtil.mapNotNull(config.getRuntimes().resolvedConfigs(),
+                                                             configuration -> configuration instanceof JavaLanguageRuntimeConfiguration ?
+                                                                              new CustomJreItem(
+                                                                                (JavaLanguageRuntimeConfiguration)configuration) : null);
+        myComboBoxModel.addAll(items);
+        if (!items.isEmpty()) {
+          myComboBoxModel.setSelectedItem(items.get(0));
+        }
+        return false;
+      }
+    }
+    buildModel(getComponent().isEditable());
+    return true;
+  }
+
+  private void buildModel(boolean editable) {
+    myComboBoxModel.add(myDefaultJreItem);
+    final Sdk[] allJDKs = ProjectJdkTable.getInstance().getAllJdks();
+    for (Sdk sdk : allJDKs) {
+      myComboBoxModel.add(new SdkAsJreItem(sdk));
+    }
+
+    final Set<String> jrePaths = new HashSet<>();
+    for (JreProvider provider : JreProvider.EP_NAME.getExtensionList()) {
+      if (provider.isAvailable()) {
+        String path = provider.getJrePath();
+        if (!StringUtil.isEmpty(path)) {
+          jrePaths.add(path);
+          myComboBoxModel.add(new CustomJreItem(provider));
+        }
+      }
+    }
+
+    for (Sdk jdk : allJDKs) {
+      String homePath = jdk.getHomePath();
+
+      if (!SystemInfo.isMac) {
+        final File jre = new File(jdk.getHomePath(), "jre");
+        if (jre.isDirectory()) {
+          homePath = jre.getPath();
+        }
+      }
+      if (jrePaths.add(homePath)) {
+        myComboBoxModel.add(new CustomJreItem(homePath, null, jdk.getVersionString()));
+      }
+    }
+    if (!editable) {
+      myComboBoxModel.add(new AddJreItem());
+    }
+  }
+
   @NotNull
   private Runnable getBrowseRunnable() {
     return new BrowseFolderRunnable<>(ExecutionBundle.message("run.configuration.select.alternate.jre.label"),
                                       ExecutionBundle.message("run.configuration.select.jre.dir.label"),
                                       null,
                                       BrowseFilesListener.SINGLE_DIRECTORY_DESCRIPTOR,
-                                      (ComboBox<JreComboBoxItem>)getComponent(),
+                                      getComponent(),
                                       JreComboboxEditor.TEXT_COMPONENT_ACCESSOR);
   }
 
   @Nullable
   public String getJrePathOrName() {
     JreComboBoxItem jre = getSelectedJre();
-    if (jre instanceof DefaultJreItem) {
+    if (jre instanceof DefaultJreItem || myRemoteTarget) {
       return myPreviousCustomJrePath;
     }
     return jre.getPathOrName();
   }
 
   public boolean isAlternativeJreSelected() {
-    return !(getSelectedJre() instanceof DefaultJreItem);
+    return !(getSelectedJre() instanceof DefaultJreItem) && !myRemoteTarget;
   }
 
   private JreComboBoxItem getSelectedJre() {
@@ -216,7 +253,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
   private void updateDefaultJrePresentation() {
     StatusText text = myComboboxEditor.getEmptyText();
     text.clear();
-    text.appendText(JavaPsiBundle.message("default.jre.name"), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+    text.appendText(ExecutionBundle.message("default.jre.name"), SimpleTextAttributes.REGULAR_ATTRIBUTES);
     text.appendText(myDefaultJreSelector.getDescriptionString(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
   }
 
@@ -239,12 +276,13 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
   interface JreComboBoxItem {
     void render(SimpleColoredComponent component, boolean selected);
     String getPresentableText();
-    @Nullable
+    default @NonNls @Nullable String getID() { return null; }
+    @Nullable @NlsSafe
     String getPathOrName();
     @Nullable
     default String getVersion() { return null; }
-    @NotNull
-    default @NlsSafe String getDescription() { return getPresentableText(); }
+
+    default @NlsSafe @Nullable String getDescription() { return getPresentableText(); }
     int getOrder();
   }
 
@@ -276,7 +314,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
     }
 
     @Override
-    public @NotNull String getDescription() {
+    public @Nullable String getDescription() {
       return mySdk.getVersionString();
     }
 
@@ -288,20 +326,37 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
 
   static class CustomJreItem implements JreComboBoxItem {
     private final String myPath;
-    private final String myName;
+    private final @NlsContexts.Label String myName;
     private final String myVersion;
+    private final String myID;
 
     CustomJreItem(String path) {
       myPath = path;
       myName = null;
       JdkVersionDetector.JdkVersionInfo info = SdkVersionUtil.getJdkVersionInfo(path);
       myVersion = info == null ? null : info.toString();
+      myID = null;
     }
 
-    CustomJreItem(String path, String name, String version) {
+    CustomJreItem(@NotNull JreProvider provider) {
+      myPath = provider.getJrePath();
+      myName = provider.getPresentableName();
+      myVersion = null;
+      myID = provider.getID();
+    }
+
+    CustomJreItem(String path, @NlsContexts.Label String name, String version) {
       myPath = path;
       myName = name;
       myVersion = version;
+      myID = null;
+    }
+
+    CustomJreItem(JavaLanguageRuntimeConfiguration runtimeConfiguration) {
+      myPath = runtimeConfiguration.getHomePath();
+      myName = null;
+      myVersion = runtimeConfiguration.getJavaVersionString();
+      myID = null;
     }
 
     @Override
@@ -312,7 +367,12 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
 
     @Override
     public @NlsContexts.Label String getPresentableText() {
-      return myName != null && !myPath.equals(myName) ? myName : FileUtil.toSystemDependentName(myPath);
+      return myName != null && !myName.equals(myPath) ? myName : FileUtil.toSystemDependentName(myPath);
+    }
+
+    @Override
+    public @NonNls @Nullable String getID() {
+      return myID;
     }
 
     @Override
@@ -326,6 +386,11 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
     }
 
     @Override
+    public @NlsSafe @Nullable String getDescription() {
+      return null;
+    }
+
+    @Override
     public int getOrder() {
       return 2;
     }
@@ -334,7 +399,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
   private class DefaultJreItem implements JreComboBoxItem {
     @Override
     public void render(SimpleColoredComponent component, boolean selected) {
-      component.append(JavaPsiBundle.message("default.jre.name"));
+      component.append(ExecutionBundle.message("default.jre.name"));
       //may be null if JrePathEditor is added to a GUI Form where the default constructor is used and setDefaultJreSelector isn't called
       if (myDefaultJreSelector != null) {
         component.append(myDefaultJreSelector.getDescriptionString(), SimpleTextAttributes.GRAY_ATTRIBUTES);
@@ -343,7 +408,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
 
     @Override
     public String getPresentableText() {
-      return JavaPsiBundle.message("default.jre.name");
+      return ExecutionBundle.message("default.jre.name");
     }
 
     @Override
@@ -357,7 +422,7 @@ public class JrePathEditor extends LabeledComponent<ComboBox> implements PanelWi
     }
 
     @Override
-    public @NotNull String getDescription() {
+    public @Nullable String getDescription() {
       return myDefaultJreSelector.getNameAndDescription().second;
     }
 

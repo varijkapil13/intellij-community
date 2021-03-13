@@ -8,10 +8,17 @@ import com.intellij.openapi.options.Configurable;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsProvider;
 import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.yaml.formatter.YAMLCodeStyleSettings;
 
+/**
+ * @deprecated This logic is moved to YAMLLanguageCodeStyleSettingsProvider.
+ * This class is still needed for compatibility for Raml plugin.
+ */
+@Deprecated(forRemoval = true)
+@ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
 public class YAMLCodeStyleSettingsProvider extends CodeStyleSettingsProvider {
   @NotNull
   @Override

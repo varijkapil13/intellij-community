@@ -21,7 +21,6 @@ import com.intellij.psi.impl.source.tree.java.PsiCompositeModifierList;
 import com.intellij.psi.scope.ElementClassHint;
 import com.intellij.psi.scope.NameHint;
 import com.intellij.psi.scope.PsiScopeProcessor;
-import com.intellij.psi.search.EverythingGlobalScope;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiSearchScopeUtil;
 import com.intellij.psi.util.*;
@@ -190,7 +189,7 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
     }
 
     RecursionGuard.StackStamp stamp = RecursionManager.markStack();
-    classes = findAllClasses(name, new EverythingGlobalScope(getProject()));
+    classes = findAllClasses(name, GlobalSearchScope.everythingScope(getProject()));
     if (stamp.mayCacheNow()) {
       map.put(name, classes);
     }
@@ -262,7 +261,7 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
 
   @Override
   public boolean containsClassNamed(@NotNull String name) {
-    return getCachedClassesByName(name, new EverythingGlobalScope(getProject())).length > 0;
+    return getCachedClassesByName(name, GlobalSearchScope.everythingScope(getProject())).length > 0;
   }
 
   @Override
@@ -368,11 +367,6 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
       }
     }
     return true;
-  }
-
-  @Override
-  public boolean canNavigate() {
-    return isValid();
   }
 
   @Override

@@ -6,11 +6,13 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.io.Decompressor;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -41,7 +43,7 @@ public final class ZipUtil {
   }
 
   public static void unzipWithProgressSynchronously(@Nullable Project project,
-                                                    @NotNull String progressTitle,
+                                                    @NotNull @NlsContexts.ProgressTitle String progressTitle,
                                                     @NotNull Path zipArchive,
                                                     @NotNull Path extractToDir,
                                                     boolean unwrapSingleTopLevelFolder) throws GeneratorException {
@@ -50,14 +52,14 @@ public final class ZipUtil {
 
   public static void unzipWithProgressSynchronously(
     @Nullable Project project,
-    @NotNull String progressTitle,
+    @NotNull @NlsContexts.ProgressTitle String progressTitle,
     @NotNull final File zipArchive,
     @NotNull final File extractToDir,
     @Nullable final NullableFunction<? super String, String> pathConvertor,
     final boolean unwrapSingleTopLevelFolder) throws GeneratorException
   {
     final Outcome<Boolean> outcome = DownloadUtil.provideDataWithProgressSynchronously(
-      project, progressTitle, "Unpacking ...",
+      project, progressTitle, LangBundle.message("progress.text.unpacking"),
       () -> {
         ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
         unzip(progress, extractToDir, zipArchive, pathConvertor, null, unwrapSingleTopLevelFolder);
@@ -110,6 +112,7 @@ public final class ZipUtil {
    * @deprecated Use {@link #unzip(ProgressIndicator, Path, ZipInputStream, NullableFunction, ContentProcessor, boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void unzip(@Nullable ProgressIndicator progress,
                            @NotNull File targetDir,
                            @NotNull ZipInputStream stream,

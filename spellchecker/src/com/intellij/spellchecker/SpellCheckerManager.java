@@ -32,12 +32,14 @@ import com.intellij.spellchecker.state.ProjectDictionaryState;
 import com.intellij.spellchecker.util.SpellCheckerBundle;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.InputStream;
 import java.util.*;
+import java.util.function.Supplier;
 
 import static com.intellij.openapi.application.PathManager.getOptionsPath;
 import static com.intellij.openapi.util.io.FileUtil.isAncestor;
@@ -189,7 +191,7 @@ public class SpellCheckerManager implements Disposable {
 
   private void initUserDictionaries() {
     CachedDictionaryState cachedDictionaryState = CachedDictionaryState.getInstance();
-    cachedDictionaryState.addCachedDictListener((dict) -> restartInspections());
+    cachedDictionaryState.addCachedDictListener((dict) -> restartInspections(), this);
     if (cachedDictionaryState.getDictionary() == null) {
       cachedDictionaryState.setDictionary(new UserDictionary(CachedDictionaryState.DEFAULT_NAME));
     }
@@ -388,19 +390,21 @@ public class SpellCheckerManager implements Disposable {
   }
 
   public enum DictionaryLevel {
-    APP("application-level"), PROJECT("project-level"), NOT_SPECIFIED("not specified");
-    private final String myName;
+    APP(SpellCheckerBundle.messagePointer("dictionary.name.application.level")),
+    PROJECT(SpellCheckerBundle.messagePointer("dictionary.name.project.level")),
+    NOT_SPECIFIED(SpellCheckerBundle.messagePointer("dictionary.name.not.specified"));
+    private final Supplier<@Nls String> myName;
 
-    @SuppressWarnings("ConstantConditions")
     private final static Map<String, DictionaryLevel> DICTIONARY_LEVELS =
       Maps.uniqueIndex(EnumSet.allOf(DictionaryLevel.class), DictionaryLevel::getName);
 
-    DictionaryLevel(String name) {
+    DictionaryLevel(@Nls Supplier<String> name) {
       myName = name;
     }
 
+    @Nls
     public String getName() {
-      return myName;
+      return myName.get();
     }
 
     @NotNull

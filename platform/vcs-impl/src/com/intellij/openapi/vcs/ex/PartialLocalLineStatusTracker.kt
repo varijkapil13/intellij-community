@@ -27,21 +27,25 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.openapi.vcs.VcsBundle
 import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.openapi.vcs.changes.ChangeListManagerImpl
 import com.intellij.openapi.vcs.changes.ChangeListWorker
 import com.intellij.openapi.vcs.changes.LocalChangeList
 import com.intellij.openapi.vcs.ex.DocumentTracker.Block
 import com.intellij.openapi.vcs.ex.LineStatusTrackerBlockOperations.Companion.isSelectedByLine
+import com.intellij.openapi.vcs.impl.ActiveChangeListTracker
 import com.intellij.openapi.vcs.impl.LineStatusTrackerManager
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.DropDownLink
 import com.intellij.util.EventDispatcher
+import com.intellij.util.concurrency.annotations.RequiresEdt
+import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.containers.WeakList
 import com.intellij.util.ui.JBUI
 import com.intellij.vcsUtil.VcsUtil
-import org.jetbrains.annotations.CalledInAwt
+import org.jetbrains.annotations.CalledInAny
 import java.awt.BorderLayout
 import java.awt.Graphics
 import java.awt.Point
@@ -49,7 +53,6 @@ import java.lang.ref.WeakReference
 import java.util.*
 import javax.swing.JComponent
 import javax.swing.JPanel
-import kotlin.collections.HashSet
 
 interface PartialLocalLineStatusTracker : LineStatusTracker<LocalRange> {
   fun getAffectedChangeListsIds(): List<String>
@@ -68,7 +71,9 @@ interface PartialLocalLineStatusTracker : LineStatusTracker<LocalRange> {
 
   fun hasPartialChangesToCommit(): Boolean
 
+  @RequiresEdt
   fun handlePartialCommit(side: Side, changelistIds: List<String>, honorExcludedFromCommit: Boolean): PartialCommitHelper
+  fun getPartialCommitContent(changelistIds: List<String>, honorExcludedFromCommit: Boolean): PartialCommitContent?
   fun rollbackChanges(changelistsIds: List<String>, honorExcludedFromCommit: Boolean)
 
 
@@ -76,17 +81,24 @@ interface PartialLocalLineStatusTracker : LineStatusTracker<LocalRange> {
 
   open class ListenerAdapter : Listener
   interface Listener : EventListener {
-    fun onBecomingValid(tracker: PartialLocalLineStatusTracker) {}
-    fun onChangeListsChange(tracker: PartialLocalLineStatusTracker) {}
-    fun onChangeListMarkerChange(tracker: PartialLocalLineStatusTracker) {}
-    fun onExcludedFromCommitChange(tracker: PartialLocalLineStatusTracker) {}
+    fun onBecomingValid(tracker: PartialLocalLineStatusTracker) = Unit
+
+    @CalledInAny
+    fun onChangeListsChange(tracker: PartialLocalLineStatusTracker) = Unit
+
+    @CalledInAny
+    fun onChangeListMarkerChange(tracker: PartialLocalLineStatusTracker) = Unit
+
+    fun onExcludedFromCommitChange(tracker: PartialLocalLineStatusTracker) = Unit
   }
 }
 
 abstract class PartialCommitHelper(val content: String) {
-  @CalledInAwt
+  @RequiresEdt
   abstract fun applyChanges()
 }
+
+class PartialCommitContent(val vcsContent: CharSequence, val currentContent: CharSequence, val rangesToCommit: List<LocalRange>)
 
 enum class ExclusionState { ALL_INCLUDED, ALL_EXCLUDED, PARTIALLY, NO_CHANGES }
 
@@ -102,7 +114,8 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     PartialLocalLineStatusTracker,
     ChangeListWorker.PartialChangeTracker {
   private val changeListManager = ChangeListManagerImpl.getInstanceImpl(project)
-  private val lstManager = LineStatusTrackerManager.getInstance(project) as LineStatusTrackerManager
+  private val lstManager = LineStatusTrackerManager.getInstanceImpl(project)
+  private val activeChangeListTracker = ActiveChangeListTracker.getInstance(project)
   private val undoManager = UndoManager.getInstance(project)
 
   private val undoStateRecordingEnabled = Registry.`is`("vcs.enable.partial.changelists.undo")
@@ -111,7 +124,6 @@ class ChangelistsLocalLineStatusTracker(project: Project,
   override val renderer: MyLineStatusMarkerRenderer = MyLineStatusMarkerRenderer(this)
 
   private var defaultMarker: ChangeListMarker
-  private var currentMarker: ChangeListMarker? = null
 
   private var initialChangeListId: String? = null
   private var lastKnownTrackerChangeListId: String? = null
@@ -183,20 +195,16 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     eventDispatcher.multicaster.onChangeListMarkerChange(this)
   }
 
-  @CalledInAwt
+  @RequiresEdt
   override fun setBaseRevision(vcsContent: CharSequence) {
     val changelistId = if (!isInitialized) initialChangeListId else null
     initialChangeListId = null
 
     setBaseRevision(vcsContent) {
       if (changelistId != null) {
-        changeListManager.executeUnderDataLock {
-          if (changeListManager.getChangeList(changelistId) != null) {
-            documentTracker.writeLock {
-              currentMarker = ChangeListMarker(changelistId)
-              documentTracker.updateFrozenContentIfNeeded()
-              currentMarker = null
-            }
+        activeChangeListTracker.runUnderChangeList(changelistId) {
+          documentTracker.writeLock {
+            documentTracker.updateFrozenContentIfNeeded()
           }
         }
       }
@@ -210,7 +218,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     if (isValid()) eventDispatcher.multicaster.onBecomingValid(this)
   }
 
-  @CalledInAwt
+  @RequiresEdt
   fun replayChangesFromDocumentEvents(events: List<DocumentEvent>) {
     if (events.isEmpty() || !blocks.isEmpty()) return
     updateDocument(Side.LEFT) { vcsDocument ->
@@ -360,7 +368,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun registerUndoAction(undo: Boolean) {
     val undoState = collectRangeStates()
     val action = MyUndoableAction(project, document, undoState, undo)
@@ -379,9 +387,11 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
 
     override fun onRangesChanged(before: List<Block>, after: Block) {
+      val activeMarker = activeChangeListTracker.getActiveChangeListId()?.let { ChangeListMarker(it) }
+                         ?: defaultMarker
+
       if (before.isEmpty()) {
-        val marker = currentMarker ?: defaultMarker
-        val changeListBlocks = blocks.filter { it.marker == marker }
+        val changeListBlocks = blocks.filter { it.marker == activeMarker }
         // default value for new blocks: include only if all changed blocks from this changelist are included
         after.excludedFromCommit = changeListBlocks.isEmpty() || changeListBlocks.any { it.excludedFromCommit }
       }
@@ -393,7 +403,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
       if (affectedMarkers.isEmpty()) {
         // put new blocks into original changelist when initializing base revision
         // put new blocks into default changelist otherwise
-        after.marker = currentMarker ?: defaultMarker
+        after.marker = activeMarker
       }
       else if (affectedMarkers.size == 1) {
         // put block into same changelist on consensus
@@ -411,7 +421,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
       after.marker = before.marker
     }
 
-    override fun onRangesMerged(block1: Block, block2: Block, merged: Block): Boolean {
+    override fun mergeRanges(block1: Block, block2: Block, merged: Block): Boolean {
       if (block1.marker == block2.marker &&
           block1.excludedFromCommit == block2.excludedFromCommit) {
         merged.marker = block1.marker
@@ -467,19 +477,22 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
+  internal fun hasPendingPartialState(): Boolean {
+    return documentTracker.readLock {
+      initialExcludeState.isNotEmpty() ||
+      initialChangeListId != null && !affectedChangeListsIds.contains(initialChangeListId)
+    }
+  }
+
   override fun hasPartialChangesToCommit(): Boolean {
     return documentTracker.readLock {
       affectedChangeLists.size > 1 || blocks.any { it.excludedFromCommit }
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   override fun handlePartialCommit(side: Side, changelistIds: List<String>, honorExcludedFromCommit: Boolean): PartialCommitHelper {
-    val markers = changelistIds.mapTo(HashSet()) { ChangeListMarker(it) }
-    val toCommitCondition: (Block) -> Boolean = {
-      markers.contains(it.marker) &&
-      (!honorExcludedFromCommit || !it.excludedFromCommit)
-    }
+    val toCommitCondition = createToCommitCondition(changelistIds, honorExcludedFromCommit)
 
     val contentToCommit = documentTracker.getContentWithPartiallyAppliedBlocks(side, toCommitCondition)
 
@@ -502,15 +515,32 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   override fun rollbackChanges(changelistsIds: List<String>, honorExcludedFromCommit: Boolean) {
+    val toCommitCondition = createToCommitCondition(changelistsIds, honorExcludedFromCommit)
+    runBulkRollback(toCommitCondition)
+  }
+
+  override fun getPartialCommitContent(changelistIds: List<String>, honorExcludedFromCommit: Boolean): PartialCommitContent? {
+    return documentTracker.readLock {
+      if (!isValid()) return@readLock null
+
+      val toCommitCondition = createToCommitCondition(changelistIds, honorExcludedFromCommit)
+      val vcsContent = documentTracker.getContent(Side.LEFT)
+      val currentContent = documentTracker.getContent(Side.RIGHT)
+      val ranges = blocks.filter { !it.range.isEmpty }.filter(toCommitCondition).map { toRange(it) }
+
+      PartialCommitContent(vcsContent, currentContent, ranges)
+    }
+  }
+
+  private fun createToCommitCondition(changelistsIds: List<String>, honorExcludedFromCommit: Boolean): (Block) -> Boolean {
     val idsSet = changelistsIds.toSet()
-    runBulkRollback {
+    return {
       idsSet.contains(it.marker.changelistId) &&
       (!honorExcludedFromCommit || !it.excludedFromCommit)
     }
   }
-
 
   protected class MyLineStatusMarkerRenderer(override val tracker: ChangelistsLocalLineStatusTracker) :
     LocalLineStatusTrackerImpl.LocalLineStatusMarkerRenderer(tracker) {
@@ -538,7 +568,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
 
       val group = DefaultActionGroup()
       if (changeLists.size > 1) {
-        group.add(Separator("Changelists"))
+        group.add(Separator(VcsBundle.message("ex.changelists")))
         for (changeList in changeLists) {
           group.add(MoveToChangeListAction(editor, range, mousePosition, changeList))
         }
@@ -562,7 +592,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
 
       val shortcuts = moveChangesShortcutSet.shortcuts
       if (shortcuts.isNotEmpty()) {
-        link.toolTipText = "Move lines to another changelist (${KeymapUtil.getShortcutText(shortcuts.first())})"
+        link.toolTipText = VcsBundle.message("ex.move.lines.to.another.changelist.0", KeymapUtil.getShortcutText(shortcuts.first()))
       }
 
       val panel = JPanel(BorderLayout())
@@ -575,7 +605,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     private inner class MoveToAnotherChangeListAction(editor: Editor, range: Range, val mousePosition: Point?)
       : RangeMarkerAction(editor, range, null) {
       init {
-        templatePresentation.text = "New Changelist..."
+        templatePresentation.text = VcsBundle.message("ex.new.changelist")
       }
 
       override fun isEnabled(editor: Editor, range: Range): Boolean = range is LocalRange
@@ -599,15 +629,10 @@ class ChangelistsLocalLineStatusTracker(project: Project,
         reopenRange(editor, range, mousePosition)
       }
     }
-
-    private fun reopenRange(editor: Editor, range: Range, mousePosition: Point?) {
-      val newRange = tracker.findRange(range)
-      if (newRange != null) tracker.renderer.showHintAt(editor, newRange, mousePosition)
-    }
   }
 
 
-  @CalledInAwt
+  @RequiresEdt
   override fun moveToChangelist(range: Range, changelist: LocalChangeList) {
     val newRange = blockOperations.findBlock(range)
     if (newRange != null) {
@@ -615,12 +640,12 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   override fun moveToChangelist(lines: BitSet, changelist: LocalChangeList) {
     moveToChangelist({ it.isSelectedByLine(lines) }, changelist)
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun moveToChangelist(condition: (Block) -> Boolean, changelist: LocalChangeList) {
     changeListManager.executeUnderDataLock {
       if (changeListManager.getChangeList(changelist.id) == null) return@executeUnderDataLock
@@ -657,7 +682,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     return ExclusionState.ALL_INCLUDED // no changes - all included
   }
 
-  @CalledInAwt
+  @RequiresEdt
   override fun setExcludedFromCommit(isExcluded: Boolean) {
     affectedChangeLists.forEach { setExcludedFromCommit(it, isExcluded) }
   }
@@ -698,7 +723,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     dropExistingUndoActions()
   }
 
-  @CalledInAwt
+  @RequiresReadLock
   internal fun storeTrackerState(): FullState {
     return documentTracker.readLock {
       val vcsContent = documentTracker.getContent(Side.LEFT)
@@ -710,7 +735,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @CalledInAwt
+  @RequiresEdt
   internal fun restoreState(state: State): Boolean {
     if (state is FullState) {
       return restoreFullState(state)
@@ -720,7 +745,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @CalledInAwt
+  @RequiresReadLock
   private fun collectRangeStates(): List<RangeState> {
     return documentTracker.readLock {
       blocks.map { RangeState(it.range, it.marker.changelistId, it.excludedFromCommit) }
@@ -749,7 +774,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     return success
   }
 
-  @CalledInAwt
+  @RequiresEdt
   private fun restoreState(states: List<RangeState>): Boolean {
     var success = false
     documentTracker.doFrozen {

@@ -158,7 +158,7 @@ public class SourcePathsStep extends AbstractStepWithProgress<List<JavaModuleSou
 
   private JComponent createComponentForChooseSources() {
     final JPanel panel = new JPanel(new GridBagLayout());
-    mySourcePathsChooser = new ElementsChooser<JavaModuleSourceRoot>(true) {
+    mySourcePathsChooser = new ElementsChooser<>(true) {
       @Override
       public String getItemText(@NotNull JavaModuleSourceRoot sourceRoot) {
         String packagePrefix = sourceRoot.getPackagePrefix();
@@ -338,12 +338,10 @@ public class SourcePathsStep extends AbstractStepWithProgress<List<JavaModuleSou
   }
 
   private class BrowsePathListener extends BrowseFilesListener {
-    private final FileChooserDescriptor myChooserDescriptor;
     private final JTextField myField;
 
     BrowsePathListener(JTextField textField, final FileChooserDescriptor chooserDescriptor) {
       super(textField, JavaUiBundle.message("prompt.select.source.directory"), "", chooserDescriptor);
-      myChooserDescriptor = chooserDescriptor;
       myField = textField;
     }
 

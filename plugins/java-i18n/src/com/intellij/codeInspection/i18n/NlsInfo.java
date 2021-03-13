@@ -2,17 +2,16 @@
 package com.intellij.codeInspection.i18n;
 
 import com.intellij.codeInsight.AnnotationUtil;
+import com.intellij.codeInspection.dataFlow.JavaMethodContractUtil;
 import com.intellij.openapi.util.NlsContext;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.*;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.THashSet;
-import kotlin.Pair;
+import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nls.Capitalization;
 import org.jetbrains.annotations.NonNls;
@@ -21,8 +20,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.uast.*;
 import org.jetbrains.uast.util.UastExpressionUtils;
 
-import java.util.*;
-import java.util.stream.IntStream;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Contains information about localization status.
@@ -30,9 +30,9 @@ import java.util.stream.IntStream;
  * which may provide additional information.
  */
 public abstract class NlsInfo {
-  private static final @NotNull Set<String> ANNOTATION_NAMES = ContainerUtil.immutableSet(AnnotationUtil.NLS, AnnotationUtil.NON_NLS);
   private static final @NotNull String NLS_CONTEXT = "com.intellij.openapi.util.NlsContext";
   static final String NLS_SAFE = "com.intellij.openapi.util.NlsSafe";
+  private static final @NotNull Set<String> ANNOTATION_NAMES = Set.of(AnnotationUtil.NLS, AnnotationUtil.NON_NLS, NLS_SAFE);
 
   /**
    * Describes a string that should be localized
@@ -96,7 +96,7 @@ public abstract class NlsInfo {
       return new Localized(myCapitalization, prefix, suffix, myAnnotationName);
     }
 
-    private @NotNull Localized withAnnotation(@NotNull PsiAnnotation annotation) {
+    private @NotNull Localized withAnnotation(@NotNull UAnnotation annotation) {
       String qualifiedName = annotation.getQualifiedName();
       if (Objects.equals(qualifiedName, myAnnotationName)) {
         return this;
@@ -188,12 +188,18 @@ public abstract class NlsInfo {
    * @return localization status
    */
   public static @NotNull NlsInfo forExpression(@NotNull UExpression expression) {
-    expression = goUp(expression);
-    NlsInfo info = fromMethodReturn(expression);
-    if (info != Unspecified.UNKNOWN) return info;
-    info = fromInitializer(expression);
-    if (info != Unspecified.UNKNOWN) return info;
-    return fromArgument(expression);
+    return forExpression(expression, true);
+  }
+
+  /**
+   * @param expression expression to determine the localization status for
+   * @param allowStringModifications whether string modifications are allowed
+   * @return localization status
+   */
+  static @NotNull NlsInfo forExpression(@NotNull UExpression expression, boolean allowStringModifications) {
+    expression = goUp(expression, allowStringModifications);
+    AnnotationContext context = AnnotationContext.fromExpression(expression);
+    return fromAnnotationContext(expression.getUastParent(), context);
   }
 
   public static @NotNull NlsInfo forType(@NotNull PsiType type) {
@@ -201,23 +207,7 @@ public abstract class NlsInfo {
   }
 
   public static @NotNull NlsInfo forModifierListOwner(@NotNull PsiModifierListOwner owner) {
-    if (owner instanceof PsiParameter) {
-      PsiElement scope = ((PsiParameter)owner).getDeclarationScope();
-      if (scope instanceof PsiMethod) {
-        PsiMethod method = (PsiMethod)scope;
-        PsiParameterList list = method.getParameterList();
-        int index = list.getParameterIndex((PsiParameter)owner);
-        if (index < 0) {
-          return Unspecified.UNKNOWN;
-        }
-        return fromMethodParameter(method, index, null);
-      }
-    }
-    if (owner instanceof PsiMethod) {
-      PsiMethod method = (PsiMethod)owner;
-      return fromMethodReturn(method, method.getReturnType(), null);
-    }
-    return fromAnnotationOwner(owner.getModifierList());
+    return fromAnnotationContext(null, AnnotationContext.fromModifierListOwner(owner));
   }
 
   public static @NotNull Capitalization getCapitalization(@NotNull PsiModifierListOwner owner) {
@@ -228,110 +218,40 @@ public abstract class NlsInfo {
     return Capitalization.NotSpecified;
   }
 
-  private static NlsInfo fromInitializer(UExpression expression) {
-    UElement parent = expression.getUastParent();
-    PsiElement var = null;
-    
-    if (parent instanceof UVariable) {
-      var = parent.getJavaPsi();
-    }
-    else if (parent instanceof UBinaryExpression) {
-      UBinaryExpression binOp = (UBinaryExpression)parent;
-      UastBinaryOperator operator = binOp.getOperator();
-      UExpression rightOperand = binOp.getRightOperand();
-      if ((operator == UastBinaryOperator.ASSIGN || operator == UastBinaryOperator.PLUS_ASSIGN) &&
-          expressionsAreEquivalent(expression, rightOperand)) {
-        UExpression leftOperand = UastUtils.skipParenthesizedExprDown(binOp.getLeftOperand());
-        UReferenceExpression lValue = ObjectUtils.tryCast(leftOperand, UReferenceExpression.class);
-        if (lValue != null) {
-          var = lValue.resolve();
-        }
-        else {
-          while (leftOperand instanceof UArrayAccessExpression) {
-            leftOperand = ((UArrayAccessExpression)leftOperand).getReceiver();
-          }
-          if (leftOperand instanceof UResolvable) {
-            var = ((UResolvable)leftOperand).resolve();
-          }
-        }
+  private static @NotNull NlsInfo fromAnnotationContext(UElement parent, AnnotationContext context) {
+    NlsInfo info = fromType(context.getType());
+    if (info != Unspecified.UNKNOWN) return info;
+    PsiModifierListOwner owner = context.getOwner();
+    if (owner == null) return Unspecified.UNKNOWN;
+    info = fromAnnotationOwner(owner.getModifierList());
+    if (info != Unspecified.UNKNOWN) return info;
+    if (owner instanceof PsiParameter) {
+      PsiParameter parameter = (PsiParameter)owner;
+      if (parameter.isVarArgs() && context.getType() instanceof PsiEllipsisType) {
+        info = fromType(((PsiEllipsisType)context.getType()).getComponentType());
       }
     }
-    else if (parent instanceof USwitchClauseExpression) {
-      if (((USwitchClauseExpression)parent).getCaseValues().contains(expression)) {
-        USwitchExpression switchExpression = UastUtils.getParentOfType(parent, USwitchExpression.class);
-        if (switchExpression != null) {
-          UExpression selector = switchExpression.getExpression();
-          if (selector instanceof UResolvable) {
-            var = ((UResolvable)selector).resolve();
-          }
-        }
+    else if (owner instanceof PsiVariable) {
+      ULocalVariable uLocal = UastContextKt.toUElement(owner, ULocalVariable.class);
+      if (uLocal != null) {
+        info = fromUVariable(uLocal);
       }
     }
-
-    if (var instanceof PsiVariable) {
-      NlsInfo info = fromAnnotationOwner(((PsiVariable)var).getModifierList());
-      if (info != Unspecified.UNKNOWN) return info;
-      info = fromType(((PsiVariable)var).getType());
-      if (info != Unspecified.UNKNOWN) return info;
-      if (var instanceof PsiField) {
-        info = fromContainer((PsiField)var);
-        if (info != Unspecified.UNKNOWN) return info;
-      }
-      return parent instanceof UCallExpression ? Unspecified.UNKNOWN 
-                                               : new Unspecified((PsiVariable)var);
+    if (info instanceof Unspecified) {
+      info = context.secondaryItems().map(item -> fromAnnotationOwner(item.getModifierList()))
+        .filter(inf -> inf != Unspecified.UNKNOWN).findFirst().orElse(info);
     }
-    if (var instanceof PsiMethod) {
-      return forModifierListOwner((PsiMethod)var);
-    }
-    return Unspecified.UNKNOWN;
-  }
-
-  private static boolean expressionsAreEquivalent(UExpression expr1, UExpression expr2) {
-    return normalize(expr1).equals(normalize(expr2));
-  }
-
-  private static @NotNull UExpression normalize(@NotNull UExpression expression) {
-    if (expression instanceof UPolyadicExpression && ((UPolyadicExpression)expression).getOperator() == UastBinaryOperator.PLUS) {
-      List<UExpression> operands = ((UPolyadicExpression)expression).getOperands();
-      if (operands.size() == 1) {
-        return operands.get(0);
+    if (info == Unspecified.UNKNOWN) {
+      PsiMember member =
+        ObjectUtils.tryCast(owner instanceof PsiParameter ? ((PsiParameter)owner).getDeclarationScope() : owner, PsiMember.class);
+      if (member != null) {
+        info = fromContainer(member);
       }
     }
-    return expression;
-  }
-
-  private static @NotNull NlsInfo fromArgument(@NotNull UExpression expression) {
-    UElement parent = expression.getUastParent();
-    UCallExpression callExpression = UastUtils.getUCallExpression(parent, 1);
-    if (callExpression == null) return Unspecified.UNKNOWN;
-
-    List<UExpression> arguments = callExpression.getValueArguments();
-    OptionalInt idx = IntStream.range(0, arguments.size())
-      .filter(i -> UastUtils.isUastChildOf(expression, UastLiteralUtils.wrapULiteral(arguments.get(i)), false))
-      .findFirst();
-
-    if (!idx.isPresent()) return Unspecified.UNKNOWN;
-
-    PsiMethod method = callExpression.resolve();
-    if (method == null) return Unspecified.UNKNOWN;
-    NlsInfo fromParameter = fromMethodParameter(method, idx.getAsInt(), null);
-    if (fromParameter != Unspecified.UNKNOWN) {
-      return fromParameter;
+    if (info == Unspecified.UNKNOWN && (!(parent instanceof UCallExpression) || owner instanceof PsiParameter)) {
+      info = new Unspecified(owner);
     }
-    PsiParameter parameter = method.getParameterList().getParameter(idx.getAsInt());
-    if (parameter != null) {
-      PsiType parameterType = parameter.getType();
-      PsiElement psi = callExpression.getSourcePsi();
-      if (psi instanceof PsiMethodCallExpression) {
-        PsiSubstitutor substitutor = ((PsiMethodCallExpression)psi).getMethodExpression().advancedResolve(false).getSubstitutor();
-        parameterType = substitutor.substitute(parameterType);
-      }
-      NlsInfo info = fromType(parameterType);
-      if (info != Unspecified.UNKNOWN) {
-        return info;
-      }
-    }
-    return new Unspecified(parameter);
+    return info;
   }
 
   private static @NotNull NlsInfo fromType(PsiType type) {
@@ -348,88 +268,168 @@ public abstract class NlsInfo {
     return result.get();
   }
 
-  private static @NotNull UExpression goUp(@NotNull UExpression expression) {
+  public static @NotNull UExpression goUp(@NotNull UExpression expression, boolean allowStringTransformation) {
     UExpression parent = expression;
     while (true) {
-      UExpression next = ObjectUtils.tryCast(parent.getUastParent(), UExpression.class);
-      if (next == null ||
-          next instanceof ULambdaExpression ||
-          next instanceof UReturnExpression ||
-          next instanceof USwitchClauseExpression ||
-          next instanceof UNamedExpression) {
+      UElement parentElement = parent.getUastParent();
+      if (parentElement instanceof ULocalVariable && parentElement.getUastParent() instanceof UDeclarationsExpression) {
+        // Kotlin has strange hierarchy for elvis operator
+        UExpressionList elvis = ObjectUtils.tryCast(parentElement.getUastParent().getUastParent(), UExpressionList.class);
+        if (elvis != null) {
+          parentElement = elvis;
+        }
+      }
+      if (parentElement instanceof UExpressionList) {
+        UExpression lastExpression = ContainerUtil.getLastItem(((UExpressionList)parentElement).getExpressions());
+        if (lastExpression != null && AnnotationContext.expressionsAreEquivalent(parent, lastExpression)) {
+          // Result of expression list is the last expression in the list in Kotlin
+          parentElement = parentElement.getUastParent();
+        }
+      }
+      UExpression next = ObjectUtils.tryCast(parentElement, UExpression.class);
+      if (next == null || next instanceof UNamedExpression) return parent;
+      if (next instanceof USwitchClauseExpression) {
+        if (((USwitchClauseExpression)next).getCaseValues().contains(AnnotationContext.normalize(parent))) return parent;
+        UExpressionList switchBody = ObjectUtils.tryCast(next.getUastParent(), UExpressionList.class);
+        if (switchBody == null) return parent;
+        USwitchExpression switchExpression = ObjectUtils.tryCast(switchBody.getUastParent(), USwitchExpression.class);
+        if (switchExpression == null) return parent;
+        next = switchExpression;
+      }
+      ULambdaExpression lambda = ObjectUtils.tryCast(next, ULambdaExpression.class);
+      if (next instanceof UReturnExpression) {
+        lambda = ObjectUtils.tryCast(((UReturnExpression)next).getJumpTarget(), ULambdaExpression.class);
+        if (lambda == null) return parent;
+      }
+      if (lambda != null) {
+        UCallExpression uastParent = ObjectUtils.tryCast(lambda.getUastParent(), UCallExpression.class);
+        if (uastParent == null) return parent;
+        PsiMethod method = uastParent.resolve();
+        if (method == null || !isPassthroughMethod(method, uastParent, lambda)) return parent;
+        next = uastParent;
+      }
+      if (next instanceof UQualifiedReferenceExpression && !TypeUtils.isJavaLangString(next.getExpressionType())
+          && !TypeUtils.typeEquals(CommonClassNames.JAVA_LANG_CHAR_SEQUENCE, next.getExpressionType())) {
         return parent;
       }
-      if (next instanceof UPolyadicExpression && ((UPolyadicExpression)next).getOperator() != UastBinaryOperator.PLUS) return parent;
+      if (next instanceof UPolyadicExpression &&
+          (!allowStringTransformation || ((UPolyadicExpression)next).getOperator() != UastBinaryOperator.PLUS)) {
+        return parent;
+      }
       if (next instanceof UCallExpression) {
         if (!UastExpressionUtils.isArrayInitializer(next) && !UastExpressionUtils.isNewArrayWithInitializer(next)) {
+          PsiMethod method = ((UCallExpression)next).resolve();
+          boolean shouldGoThroughCall =
+            TypeUtils.isJavaLangString(next.getExpressionType()) &&
+            (allowStringTransformation && isStringProcessingMethod(method) ||
+             isPassthroughMethod(method, (UCallExpression)next, parent));
+          if (!shouldGoThroughCall) return parent;
+        }
+      }
+      if (next instanceof UIfExpression && AnnotationContext.expressionsAreEquivalent(parent, ((UIfExpression)next).getCondition())) {
+        return parent;
+      }
+      if (next instanceof USwitchExpression) {
+        final UExpression condExpression = ((USwitchExpression)next).getExpression();
+        if (condExpression != null && AnnotationContext.expressionsAreEquivalent(parent, condExpression)) {
           return parent;
         }
       }
-      if (next instanceof UIfExpression && expressionsAreEquivalent(parent, ((UIfExpression)next).getCondition())) return parent;
       parent = next;
     }
   }
 
-  private static @NotNull NlsInfo fromMethodReturn(@NotNull UExpression expression) {
-    PsiMethod method;
-    PsiType returnType = null;
-    UNamedExpression nameValuePair = UastUtils.getParentOfType(expression, UNamedExpression.class);
-    if (nameValuePair != null) {
-      method = UastUtils.getAnnotationMethod(nameValuePair);
+  static boolean isPassthroughMethod(@Nullable PsiMethod method, @Nullable UCallExpression call, @Nullable UExpression arg) {
+    if (method == null) return false;
+    PsiType type = method.getReturnType();
+    PsiTypeParameter typeParameter = ObjectUtils.tryCast(PsiUtil.resolveClassInClassTypeOnly(type), PsiTypeParameter.class);
+    if (typeParameter != null && typeParameter.getExtendsList().getReferencedTypes().length == 0) {
+      PsiParameter[] parameters;
+      if (arg == null || call == null) {
+        parameters = method.getParameterList().getParameters();
+      } else {
+        PsiParameter parameter = AnnotationContext.getParameter(method, call, arg);
+        if (parameter == null) return false;
+        PsiType parameterType = parameter.getType();
+        PsiElement psi = call.getSourcePsi();
+        if (psi instanceof PsiMethodCallExpression) {
+          PsiSubstitutor substitutor = ((PsiMethodCallExpression)psi).getMethodExpression().advancedResolve(false).getSubstitutor();
+          parameterType = substitutor.substitute(parameterType);
+        }
+        if (fromType(parameterType) != Unspecified.UNKNOWN) return false;
+        parameters = new PsiParameter[]{parameter};
+      }
+      for (PsiParameter parameter : parameters) {
+        PsiType parameterType = parameter.getType();
+        if (type.equals(GenericsUtil.getVariableTypeByExpressionType(parameterType))) return true;
+        PsiType returnType = GenericsUtil.getVariableTypeByExpressionType(LambdaUtil.getFunctionalInterfaceReturnType(parameterType));
+        if (type.equals(returnType)) return true;
+      }
     }
-    else {
-      UReturnExpression returnStmt = ObjectUtils.tryCast(expression.getUastParent(), UReturnExpression.class);
-      if (returnStmt == null) return Unspecified.UNKNOWN;
-      UElement jumpTarget = returnStmt.getJumpTarget();
-      if (jumpTarget instanceof UMethod) {
-        method = ((UMethod)jumpTarget).getJavaPsi();
-      }
-      else if (jumpTarget instanceof ULambdaExpression) {
-        PsiType type = ((ULambdaExpression)jumpTarget).getFunctionalInterfaceType();
-        returnType = LambdaUtil.getFunctionalInterfaceReturnType(type);
-        if (type == null) return Unspecified.UNKNOWN;
-        method = LambdaUtil.getFunctionalInterfaceMethod(type);
-      }
-      else {
-        return Unspecified.UNKNOWN;
-      }
-    }
-    if (method == null) return Unspecified.UNKNOWN;
-
-    return fromMethodReturn(method, returnType, null);
+    return isKotlinPassthroughMethod(method);
   }
 
-  private static @NotNull NlsInfo fromMethodReturn(@NotNull PsiMethod method,
-                                                   @Nullable PsiType returnType,
-                                                   @Nullable Collection<? super PsiMethod> processed) {
-    if (processed != null && processed.contains(method)) {
-      return Unspecified.UNKNOWN;
+  /**
+   * Checks if the method is detected to be a string-processing method. A string processing method is a method that:
+   * <ul>
+   *   <li>Pure (either explicitly marked or inferred)</li>
+   *   <li>Accepts parameters</li>
+   *   <li>No parameters are marked using Nls annotations</li>
+   *   <li>Return value is not marked using Nls annotations</li>
+   * </ul>
+   *
+   * @param method                    method to check
+   * @return true if method is detected to be a string-processing method. A string processing method is a method that:
+   */
+  static boolean isStringProcessingMethod(PsiMethod method) {
+    if (method == null) return false;
+    if (!(forModifierListOwner(method) instanceof Unspecified)) return false;
+    if (!JavaMethodContractUtil.isPure(method)) return false;
+    PsiParameter[] parameters = method.getParameterList().getParameters();
+    if (parameters.length == 0) return false;
+    for (PsiParameter parameter : parameters) {
+      if (!(forModifierListOwner(parameter) instanceof Unspecified)) return false;
     }
-    NlsInfo methodInfo = fromAnnotationOwner(method.getModifierList());
-    if (methodInfo != Unspecified.UNKNOWN) {
-      return methodInfo;
-    }
+    return true;
+  }
 
-    if (returnType != null) {
-      NlsInfo info = fromType(returnType);
+  private static boolean isKotlinPassthroughMethod(PsiMethod method) {
+    if ((method.getName().equals("let") || method.getName().equals("run")) &&
+        method.getModifierList().textMatches("public inline")) {
+      PsiParameter[] parameters = method.getParameterList().getParameters();
+      if (parameters.length == 2 && isReceiver(method, parameters[0]) && parameters[1].getName().equals("block")) {
+        return true;
+      }
+    }
+    if (method.getName().equals("joinToString")) {
+      PsiClass aClass = method.getContainingClass();
+      return aClass != null && "kotlin.collections.CollectionsKt___CollectionsKt".equals(aClass.getQualifiedName());
+    }
+    if (method.hasModifierProperty(PsiModifier.STATIC)) {
+      PsiParameter parameter = method.getParameterList().getParameter(0);
+      if (parameter != null && isReceiver(method, parameter)) {
+        PsiClass aClass = method.getContainingClass();
+        return aClass != null &&
+               aClass.getQualifiedName() != null &&
+               aClass.getQualifiedName().startsWith("kotlin.text.StringsKt__Strings");
+      }
+    }
+    return false;
+  }
+
+  static @NotNull NlsInfo fromUVariable(@NotNull UVariable owner) {
+    for (UAnnotation annotation : owner.getUAnnotations()) {
+      NlsInfo info = fromAnnotation(annotation);
+      if (info != Unspecified.UNKNOWN) {
+        return info;
+      }
+      info = fromMetaAnnotation(annotation);
       if (info != Unspecified.UNKNOWN) {
         return info;
       }
     }
-    final PsiMethod[] superMethods = method.findSuperMethods();
-    if (superMethods.length > 0) {
-      if (processed == null) {
-        processed = new THashSet<>();
-      }
-      processed.add(method);
-      for (PsiMethod superMethod : superMethods) {
-        NlsInfo superInfo = fromMethodReturn(superMethod, null, processed);
-        if (superInfo != Unspecified.UNKNOWN) return superInfo;
-      }
-    }
-    return new Unspecified(method);
+    return Unspecified.UNKNOWN;
   }
-
 
   private static @NotNull NlsInfo fromAnnotationOwner(@Nullable PsiAnnotationOwner owner) {
     if (owner == null) return Unspecified.UNKNOWN;
@@ -440,16 +440,18 @@ public abstract class NlsInfo {
     return computeFromAnnotationOwner(owner);
   }
 
-  @NotNull
-  private static NlsInfo computeFromAnnotationOwner(@NotNull PsiAnnotationOwner owner) {
+  private static @NotNull NlsInfo computeFromAnnotationOwner(@NotNull PsiAnnotationOwner owner) {
     for (PsiAnnotation annotation : owner.getAnnotations()) {
       NlsInfo info = fromAnnotation(annotation);
       if (info != Unspecified.UNKNOWN) {
         return info;
       }
-      info = fromMetaAnnotation(annotation);
-      if (info != Unspecified.UNKNOWN) {
-        return info;
+      UAnnotation uAnnotation = UastContextKt.toUElement(annotation, UAnnotation.class);
+      if (uAnnotation != null) {
+        info = fromMetaAnnotation(uAnnotation);
+        if (info != Unspecified.UNKNOWN) {
+          return info;
+        }
       }
     }
     if (owner instanceof PsiModifierList) {
@@ -465,10 +467,8 @@ public abstract class NlsInfo {
     return Unspecified.UNKNOWN;
   }
 
-  private static @NotNull NlsInfo fromMetaAnnotation(@NotNull PsiAnnotation annotation) {
-    PsiJavaCodeReferenceElement element = annotation.getNameReferenceElement();
-    if (element == null) return Unspecified.UNKNOWN;
-    PsiClass annotationClass = ObjectUtils.tryCast(element.resolve(), PsiClass.class);
+  private static @NotNull NlsInfo fromMetaAnnotation(@NotNull UAnnotation annotation) {
+    PsiClass annotationClass = annotation.resolve();
     if (annotationClass == null) return Unspecified.UNKNOWN;
     NlsInfo baseInfo = Unspecified.UNKNOWN;
     String prefix = "";
@@ -492,27 +492,32 @@ public abstract class NlsInfo {
   }
 
   private static @NotNull NlsInfo fromAnnotation(@NotNull PsiAnnotation annotation) {
-    if (annotation.hasQualifiedName(AnnotationUtil.NON_NLS) ||
-        annotation.hasQualifiedName(AnnotationUtil.PROPERTY_KEY)) {
+    return fromAnnotationInfo(
+      annotation.getQualifiedName(),
+      () -> UastContextKt.toUElement(annotation.findAttributeValue("capitalization"), UExpression.class)
+    );
+  }
+
+  private static @NotNull NlsInfo fromAnnotation(@NotNull UAnnotation annotation) {
+    return fromAnnotationInfo(annotation.getQualifiedName(), () -> annotation.findAttributeValue("capitalization"));
+  }
+
+  private static @NotNull NlsInfo fromAnnotationInfo(String qualifiedName, Supplier<UExpression> capitalization) {
+      if (qualifiedName == null) return Unspecified.UNKNOWN;
+    if (qualifiedName.equals(AnnotationUtil.NON_NLS) ||
+        qualifiedName.equals(AnnotationUtil.PROPERTY_KEY)) {
       return NonLocalized.INSTANCE;
     }
-    if (annotation.hasQualifiedName(NLS_SAFE) ||
-        annotation.hasQualifiedName("org.intellij.lang.annotations.RegExp")) {
+    if (qualifiedName.equals(NLS_SAFE) ||
+        qualifiedName.equals("org.intellij.lang.annotations.RegExp")) {
       return NlsSafe.INSTANCE;
     }
-    if (annotation.hasQualifiedName(AnnotationUtil.NLS)) {
-      PsiAnnotationMemberValue value = annotation.findAttributeValue("capitalization");
+    if (qualifiedName.equals(AnnotationUtil.NLS)) {
+      UExpression value = capitalization.get();
       String name = null;
-      if (value instanceof PsiReferenceExpression) {
+      if (value instanceof UReferenceExpression) {
         // Java plugin returns reference for enum constant in annotation value
-        name = ((PsiReferenceExpression)value).getReferenceName();
-      }
-      else if (value instanceof PsiLiteralExpression) {
-        // But Kotlin plugin returns kotlin.Pair (enumClass : ClassId, constantName : Name) for enum constant in annotation value!
-        Pair<?, ?> pair = ObjectUtils.tryCast(((PsiLiteralExpression)value).getValue(), Pair.class);
-        if (pair != null && pair.getSecond() != null) {
-          name = pair.getSecond().toString();
-        }
+        name = ((UReferenceExpression)value).getResolvedName();
       }
       if (name != null) {
         if (Capitalization.Title.name().equals(name)) {
@@ -527,40 +532,8 @@ public abstract class NlsInfo {
     return Unspecified.UNKNOWN;
   }
 
-  private static @NotNull NlsInfo fromMethodParameter(@NotNull PsiMethod method,
-                                                      int idx,
-                                                      @Nullable Collection<? super PsiMethod> processed) {
-    if (processed != null && processed.contains(method)) {
-      return Unspecified.UNKNOWN;
-    }
-
-    final PsiParameter[] params = method.getParameterList().getParameters();
-    PsiParameter param;
-    if (idx >= params.length) {
-      PsiParameter lastParam = ArrayUtil.getLastElement(params);
-      if (lastParam == null || !lastParam.isVarArgs()) return Unspecified.UNKNOWN;
-      param = lastParam;
-    }
-    else {
-      param = params[idx];
-    }
-    NlsInfo explicit = fromAnnotationOwner(param.getModifierList());
-    if (explicit != Unspecified.UNKNOWN) {
-      return explicit;
-    }
-
-    final PsiMethod[] superMethods = method.findSuperMethods();
-    if (superMethods.length > 0) {
-      if (processed == null) {
-        processed = new THashSet<>();
-      }
-      processed.add(method);
-      for (PsiMethod superMethod : superMethods) {
-        NlsInfo superInfo = fromMethodParameter(superMethod, idx, processed);
-        if (superInfo != Unspecified.UNKNOWN) return superInfo;
-      }
-    }
-    return fromContainer(method);
+  private static boolean isReceiver(PsiMethod method, PsiParameter param) {
+    return param.getName().equals("$receiver") || param.getName().equals("$this$" + method.getName());
   }
 
   private static @NotNull NlsInfo fromContainer(@NotNull PsiMember member) {

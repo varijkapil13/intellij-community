@@ -21,7 +21,6 @@ import com.intellij.openapi.roots.LibraryOrderEntry;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.util.ActionCallback;
-import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
@@ -31,7 +30,6 @@ import com.intellij.psi.PsiFile;
 import com.intellij.util.containers.ContainerUtil;
 import org.gradle.initialization.BuildLayoutParameters;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.service.project.GradleProjectResolverUtil;
@@ -58,12 +56,12 @@ public class GradleAttachSourcesProvider implements AttachSourcesProvider {
 
     return Collections.singleton(new AttachSourcesAction() {
       @Override
-      public @Nls(capitalization = Nls.Capitalization.Title) String getName() {
+      public String getName() {
         return GradleBundle.message("gradle.action.download.sources");
       }
 
       @Override
-      public @NlsContexts.LinkLabel String getBusyText() {
+      public String getBusyText() {
         return GradleBundle.message("gradle.action.download.sources.busy.text");
       }
 
@@ -111,12 +109,17 @@ public class GradleAttachSourcesProvider implements AttachSourcesProvider {
                             "        doLast {\n" +
                             "          def configuration = null\n" +
                             "          def repository = project.repositories.toList().find {\n" +
+                            "              logger.lifecycle('Attempt to download sources from ' + it.name)\n" +
                             "              project.repositories.clear()\n" +
                             "              project.repositories.add(it)\n" +
-                            "              configuration = project.configurations.create('downloadSourcesFrom_' + it.name + '_' + UUID.randomUUID())\n" +
+                            "              configuration = project.configurations.create('downloadSourcesFrom_' + UUID.randomUUID())\n" +
                             "              configuration.transitive = false\n" +
                             "              project.dependencies.add(configuration.name, '" + sourceArtifactNotation + "')\n" +
-                            "              configuration.resolvedConfiguration.lenientConfiguration.getFiles().any()\n" +
+                            "              def files = null\n" +
+                            "              try {\n" +
+                            "                files = configuration.resolvedConfiguration.lenientConfiguration.getFiles()\n" +
+                            "              } catch (java.lang.Throwable ignore) { }\n" +
+                            "              return files && !files.isEmpty()\n" +
                             "          }\n" +
                             "          if (!repository) {\n" +
                             "              configuration = project.configurations.create('downloadSources_' + UUID.randomUUID())\n" +
@@ -124,7 +127,11 @@ public class GradleAttachSourcesProvider implements AttachSourcesProvider {
                             "              project.dependencies.add(configuration.name, '" + sourceArtifactNotation + "')\n" +
                             "              configuration.resolve()\n" +
                             "          }\n" +
-                            "          new File('" + sourcesLocationFilePath + "').write configuration?.singleFile?.path\n" +
+                            "          def sourcesPath = configuration?.singleFile?.path\n" +
+                            "          if (sourcesPath) {\n" +
+                            "            logger.lifecycle('Sources were downloaded to ' + sourcesPath)\n" +
+                            "            new File('" + sourcesLocationFilePath + "').write sourcesPath\n" +
+                            "          } else throw new RuntimeException('Sources download failed')\n" +
                             "        }\n" +
                             "      }\n" +
                             "    }\n" +
@@ -136,7 +143,7 @@ public class GradleAttachSourcesProvider implements AttachSourcesProvider {
 
         String gradleVmOptions = GradleSettings.getInstance(project).getGradleVmOptions();
         ExternalSystemTaskExecutionSettings settings = new ExternalSystemTaskExecutionSettings();
-        settings.setExecutionName("Download sources");
+        settings.setExecutionName(getName());
         settings.setExternalProjectPath(ExternalSystemApiUtil.getExternalRootProjectPath(module));
         settings.setTaskNames(Collections.singletonList(taskName));
         settings.setVmOptions(gradleVmOptions);
@@ -173,9 +180,11 @@ public class GradleAttachSourcesProvider implements AttachSourcesProvider {
             @Override
             public void onFailure() {
               resultWrapper.setRejected();
-              String message = ("<html>Sources not found for: " + artifactCoordinates) + "</html>";
-              NotificationData notification = new NotificationData(
-                "Sources download failed", message, NotificationCategory.WARNING, NotificationSource.PROJECT_SYNC);
+              String title = GradleBundle.message("gradle.notifications.sources.download.failed.title");
+              String message = GradleBundle.message("gradle.notifications.sources.download.failed.content", artifactCoordinates);
+              NotificationData notification =
+                new NotificationData(title, message, NotificationCategory.WARNING, NotificationSource.PROJECT_SYNC);
+              notification.setBalloonNotification(true);
               ExternalSystemNotificationManager.getInstance(project).showNotification(GradleConstants.SYSTEM_ID, notification);
             }
           }, ProgressExecutionMode.IN_BACKGROUND_ASYNC, false, userData);

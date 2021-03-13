@@ -2,6 +2,7 @@
 package com.intellij.util.io
 
 import com.intellij.util.lazyPub
+import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
 import java.io.InputStream
 import java.math.BigInteger
@@ -33,6 +34,10 @@ object DigestUtil {
   private val sha256 by lazyPub { getMessageDigest("SHA-256") }
 
   @JvmStatic
+  fun sha512(): MessageDigest = sha512.cloneDigest()
+  private val sha512 by lazyPub { getMessageDigest("SHA-512") }
+
+  @JvmStatic
   fun digestToHash(digest: MessageDigest) = bytesToHex(digest.digest())
 
   @JvmStatic
@@ -46,6 +51,7 @@ object DigestUtil {
                         "Implement the hashing yourself. " +
                         "Also make sure that you create new or reset the MessageDigest")
   @JvmStatic
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   fun calculateContentHash(digest: MessageDigest, bytes: ByteArray): ByteArray {
     // Preserve contract compatibility: make sure the digest is reset.
     val resetDigest = digest.cloneDigest()
@@ -59,13 +65,14 @@ object DigestUtil {
    * Digest cloning is faster than requesting a new one from [MessageDigest.getInstance].
    * This approach is used in Guava as well.
    */
-  private fun MessageDigest.cloneDigest(): MessageDigest =
-    try {
+  private fun MessageDigest.cloneDigest(): MessageDigest {
+    return try {
       clone() as MessageDigest
     }
     catch (e: CloneNotSupportedException) {
       throw IllegalArgumentException("Message digest is not cloneable: ${this}")
     }
+  }
 
   @JvmStatic
   fun updateContentHash(digest: MessageDigest, path: Path) {
@@ -94,9 +101,9 @@ object DigestUtil {
     }
   }
 
-  private fun getMessageDigest(algorithm: String): MessageDigest =
-    MessageDigest.getInstance(algorithm, sunSecurityProvider)
-
+  private fun getMessageDigest(algorithm: String): MessageDigest {
+    return MessageDigest.getInstance(algorithm, sunSecurityProvider)
+  }
 }
 
 private fun bytesToHex(data: ByteArray): String {

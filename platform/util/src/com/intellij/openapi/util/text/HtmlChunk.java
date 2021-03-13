@@ -9,6 +9,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
+import java.util.stream.Collector;
 
 /**
  * An immutable representation of HTML node. Could be used as a DSL to quickly generate HTML strings.
@@ -38,7 +39,7 @@ public abstract class HtmlChunk {
 
     @Override
     public void appendTo(@NotNull StringBuilder builder) {
-      builder.append(StringUtil.escapeXmlEntities(myContent));
+      builder.append(StringUtil.escapeXmlEntities(myContent).replaceAll("\n", "<br/>"));
     }
   }
   
@@ -56,9 +57,9 @@ public abstract class HtmlChunk {
   }
   
   static class Fragment extends HtmlChunk {
-    private final List<HtmlChunk> myContent;
+    private final List<? extends HtmlChunk> myContent;
 
-    Fragment(List<HtmlChunk> content) {
+    Fragment(List<? extends HtmlChunk> content) {
       myContent = content;
     }
 
@@ -85,9 +86,14 @@ public abstract class HtmlChunk {
   }
 
   public static class Element extends HtmlChunk {
+    private static final Element HEAD = tag("head");
     private static final Element BODY = tag("body");
     private static final Element HTML = tag("html");
     private static final Element BR = tag("br");
+    private static final Element UL = tag("ul");
+    private static final Element LI = tag("li");
+    private static final Element HR = tag("hr");
+    private static final Element P = tag("p");
     private static final Element DIV = tag("div");
     private static final Element SPAN = tag("span");
 
@@ -130,6 +136,11 @@ public abstract class HtmlChunk {
       return new Element(myTagName, myAttributes.with(name, value), myChildren);
     }
 
+    @Contract(pure = true)
+    public @NotNull Element attr(@NonNls String name, int value) {
+      return new Element(myTagName, myAttributes.with(name, Integer.toString(value)), myChildren);
+    }
+
     /**
      * @param style CSS style specification
      * @return a new element that is like this element but has the specified style added or replaced
@@ -149,6 +160,15 @@ public abstract class HtmlChunk {
     }
 
     /**
+     * @param text text to add to the list of children (should not be escaped)
+     * @return a new element that is like this element but has an extra text child
+     */
+    @Contract(pure = true)
+    public @NotNull Element addRaw(@NotNull @Nls String text) {
+      return child(raw(text));
+    }
+
+    /**
      * @param chunks chunks to add to the list of children
      * @return a new element that is like this element but has extra children
      */
@@ -159,7 +179,22 @@ public abstract class HtmlChunk {
       }
       List<HtmlChunk> newChildren = new ArrayList<>(myChildren.size() + chunks.length);
       newChildren.addAll(myChildren);
-      Collections.addAll(myChildren, chunks);
+      Collections.addAll(newChildren, chunks);
+      return new Element(myTagName, myAttributes, newChildren);
+    }
+
+    /**
+     * @param chunks chunks to add to the list of children
+     * @return a new element that is like this element but has extra children
+     */
+    @Contract(pure = true)
+    public @NotNull Element children(@NotNull List<? extends HtmlChunk> chunks) {
+      if (myChildren.isEmpty()) {
+        return new Element(myTagName, myAttributes, new ArrayList<>(chunks));
+      }
+      List<HtmlChunk> newChildren = new ArrayList<>(myChildren.size() + chunks.size());
+      newChildren.addAll(myChildren);
+      newChildren.addAll(chunks);
       return new Element(myTagName, myAttributes, newChildren);
     }
 
@@ -195,6 +230,14 @@ public abstract class HtmlChunk {
   @Contract(pure = true)
   public @NotNull Element wrapWith(@NotNull Element element) {
     return element.child(this);
+  }
+
+  /**
+   * @return a CODE element that wraps this element
+   */
+  @Contract(pure = true)
+  public @NotNull Element code() {
+    return wrapWith("code");
   }
 
   /**
@@ -271,6 +314,54 @@ public abstract class HtmlChunk {
   }
 
   /**
+   * @return a &lt;li&gt; element.
+   */
+  @Contract(pure = true)
+  public static @NotNull Element li() {
+    return Element.LI;
+  }
+
+  /**
+   * @return a &lt;ul&gt; element.
+   */
+  @Contract(pure = true)
+  public static @NotNull Element ul() {
+    return Element.UL;
+  }
+
+  /**
+   * @return a &lt;hr&gt; element.
+   */
+  @Contract(pure = true)
+  public static @NotNull Element hr() {
+    return Element.HR;
+  }
+
+  /**
+   * @return a &lt;p&gt; element.
+   */
+  @Contract(pure = true)
+  public static @NotNull Element p() {
+    return Element.P;
+  }
+
+  /**
+   * @return a &lt;body&gt; element.
+   */
+  @Contract(pure = true)
+  public static @NotNull Element head() {
+    return Element.HEAD;
+  }
+
+  public static @NotNull Element styleTag(@NonNls @NotNull String style) {
+    return tag("style").addRaw(style); //NON-NLS
+  }
+
+  public static @NotNull Element font(@NonNls @NotNull String color) {
+    return tag("font").attr("color", color);
+  }
+
+  /**
    * @return a &lt;body&gt; element.
    */
   @Contract(pure = true)
@@ -313,7 +404,8 @@ public abstract class HtmlChunk {
   /**
    * Creates a HTML text node
    * 
-   * @param text text to display (no escaping should be done by caller).
+   * @param text text to display (no escaping should be done by caller). 
+   *             All {@code '\n'} characters will be converted to {@code <br/>}
    * @return HtmlChunk that represents a HTML text node.
    */
   @Contract(pure = true)
@@ -355,6 +447,16 @@ public abstract class HtmlChunk {
   }
 
   /**
+   * Creates an html entity (e.g. `&ndash;`)
+   * @param htmlEntity entity
+   * @return the HtmlChunk that represents the html entity
+   */
+  @Contract(pure = true)
+  public static @NotNull HtmlChunk htmlEntity(@NotNull @NlsSafe String htmlEntity) {
+    return raw(htmlEntity);
+  }
+
+  /**
    * @return true if this chunk is empty (doesn't produce any text) 
    */
   @Contract(pure = true)
@@ -378,6 +480,33 @@ public abstract class HtmlChunk {
   public @NlsSafe @NotNull String toString() {
     StringBuilder builder = new StringBuilder();
     appendTo(builder);
-    return builder.toString(); 
+    return builder.toString();
+  }
+
+  /**
+   * @return the collector that collects a stream of HtmlChunks to the fragment chunk.
+   */
+  @Contract(pure = true)
+  public static @NotNull Collector<HtmlChunk, ?, HtmlChunk> toFragment() {
+    return Collector.of(HtmlBuilder::new, HtmlBuilder::append, HtmlBuilder::append, HtmlBuilder::toFragment);
+  }
+
+  /**
+   * @param separator a chunk that should be used as a delimiter
+   * @return the collector that collects a stream of HtmlChunks to the fragment chunk.
+   */
+  @Contract(pure = true)
+  public static @NotNull Collector<HtmlChunk, ?, HtmlChunk> toFragment(HtmlChunk separator) {
+    return Collector.of(HtmlBuilder::new, (hb, c) -> {
+      if (!hb.isEmpty()) {
+        hb.append(separator);
+      }
+      hb.append(c);
+    }, (hb1, hb2) -> {
+      if (!hb1.isEmpty()) {
+        hb1.append(separator);
+      }
+      return hb1.append(hb2);
+    }, HtmlBuilder::toFragment);
   }
 }

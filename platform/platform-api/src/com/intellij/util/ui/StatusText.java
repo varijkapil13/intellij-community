@@ -10,6 +10,7 @@ import com.intellij.ui.components.JBViewport;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -25,6 +26,7 @@ public abstract class StatusText {
    * @deprecated Use {@link #getDefaultEmptyText()} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public static final String DEFAULT_EMPTY_TEXT = "Nothing to show";
 
   private static final int Y_GAP = 2;
@@ -39,13 +41,19 @@ public abstract class StatusText {
   private String myText = "";
 
   // Hardcoded layout manages two columns (primary and secondary) with vertically aligned components inside
-  protected static final class Column {
+  protected final class Column {
     List<Fragment> fragments = new ArrayList<>();
     private final Dimension preferredSize = new Dimension();
   }
 
-  protected static final class Fragment {
-    private final SimpleColoredComponent myComponent = new SimpleColoredComponent();
+  protected final class Fragment {
+    private final SimpleColoredComponent myComponent = new SimpleColoredComponent() {
+      @Override
+      protected void revalidateAndRepaint() {
+        super.revalidateAndRepaint();
+        updateBounds();
+      }
+    };
 
     private final Rectangle boundsInColumn = new Rectangle();
     private final List<ActionListener> myClickListeners = ContainerUtil.createLockFreeCopyOnWriteList();
@@ -61,6 +69,7 @@ public abstract class StatusText {
   private boolean myHasActiveClickListeners; // calculated field for performance optimization
   private boolean myShowAboveCenter = true;
   private Font myFont = null;
+  private boolean myCenterAlignText = true;
 
   protected StatusText(JComponent owner) {
     this();
@@ -74,7 +83,7 @@ public abstract class StatusText {
         if (e.getButton() == MouseEvent.BUTTON1 && clickCount == 1) {
           ActionListener actionListener = findActionListenerAt(e.getPoint());
           if (actionListener != null) {
-            actionListener.actionPerformed(new ActionEvent(this, 0, ""));
+            actionListener.actionPerformed(new ActionEvent(e, 0, ""));
             return true;
           }
         }
@@ -114,6 +123,14 @@ public abstract class StatusText {
     myPrimaryColumn.fragments.forEach(fragment -> fragment.myComponent.setFont(font));
     mySecondaryColumn.fragments.forEach(fragment -> fragment.myComponent.setFont(font));
     myFont = font;
+  }
+
+  public boolean isCenterAlignText() {
+    return myCenterAlignText;
+  }
+
+  public void setCenterAlignText(boolean centerAlignText) {
+    myCenterAlignText = centerAlignText;
   }
 
   public void attachTo(@Nullable Component owner) {
@@ -236,7 +253,17 @@ public abstract class StatusText {
   }
 
   public StatusText appendText(boolean isPrimaryColumn, int row, @NlsContexts.StatusText String text, SimpleTextAttributes attrs, ActionListener listener) {
+    return appendText(isPrimaryColumn, row, null, text, attrs, listener);
+  }
+
+  public StatusText appendText(boolean isPrimaryColumn,
+                               int row,
+                               @Nullable Icon icon,
+                               @NlsContexts.StatusText String text,
+                               SimpleTextAttributes attrs,
+                               ActionListener listener) {
     Fragment fragment = getOrCreateFragment(isPrimaryColumn, row);
+    fragment.myComponent.setIcon(icon);
     fragment.myComponent.append(text, attrs);
     fragment.myClickListeners.add(listener);
     myHasActiveClickListeners |= listener != null;
@@ -250,7 +277,7 @@ public abstract class StatusText {
     updateBounds(mySecondaryColumn);
   }
 
-  private static void updateBounds(Column column) {
+  private void updateBounds(Column column) {
     Dimension size = new Dimension();
     for (int i = 0; i < column.fragments.size(); i++) {
       Fragment fragment = column.fragments.get(i);
@@ -260,9 +287,11 @@ public abstract class StatusText {
       if (i > 0) size.height += JBUIScale.scale(Y_GAP);
       size.width = Math.max(size.width, d.width);
     }
-    for (int i = 0; i < column.fragments.size(); i++) {
-      Fragment fragment = column.fragments.get(i);
-      fragment.boundsInColumn.x += (size.width - fragment.boundsInColumn.width)/2;
+    if (myCenterAlignText) {
+      for (int i = 0; i < column.fragments.size(); i++) {
+        Fragment fragment = column.fragments.get(i);
+        fragment.boundsInColumn.x += (size.width - fragment.boundsInColumn.width)/2;
+      }
     }
     column.preferredSize.setSize(size);
   }
@@ -296,8 +325,21 @@ public abstract class StatusText {
     return appendLine(text, DEFAULT_ATTRIBUTES, null);
   }
 
-  public StatusText appendLine(@NotNull @NlsContexts.StatusText String text, @NotNull SimpleTextAttributes attrs, @Nullable ActionListener listener) {
-    return appendText(true, myPrimaryColumn.fragments.size(), text, attrs, listener);
+  public StatusText appendLine(@NotNull @NlsContexts.StatusText String text,
+                               @NotNull SimpleTextAttributes attrs,
+                               @Nullable ActionListener listener) {
+    return appendLine(null, text, attrs, listener);
+  }
+
+  public StatusText appendLine(@Nullable Icon icon,
+                               @NotNull @NlsContexts.StatusText String text,
+                               @NotNull SimpleTextAttributes attrs,
+                               @Nullable ActionListener listener) {
+    if (myIsDefaultText) {
+      clear();
+      myIsDefaultText = false;
+    }
+    return appendText(true, myPrimaryColumn.fragments.size(), icon, text, attrs, listener);
   }
 
   public void paint(Component owner, Graphics g) {

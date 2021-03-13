@@ -3,16 +3,24 @@ package com.intellij.execution.ui;
 
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.options.CompositeSettingsBuilder;
 import com.intellij.openapi.options.OptionsBundle;
 import com.intellij.openapi.options.SettingsEditor;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
+import com.intellij.openapi.ui.popup.util.PopupUtil;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.TextWithMnemonic;
+import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.PanelWithAnchor;
 import com.intellij.ui.SeparatorFactory;
 import com.intellij.ui.components.DropDownLink;
@@ -35,6 +43,7 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
   public static final int TAG_VGAP = JBUI.scale(6);
   public static final int TAG_HGAP = JBUI.scale(2);
 
+  private final Disposable myDisposable;
   private final JPanel myPanel = new JPanel(new GridBagLayout()) {
     @Override
     public void addNotify() {
@@ -44,22 +53,24 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
   };
   private final GridBagConstraints myConstraints =
     new GridBagConstraints(0, 0, 1, 1, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.BOTH, JBUI.insetsTop(TOP_INSET), 0, 0);
-  private final Collection<SettingsEditorFragment<Settings, ?>> myFragments;
+  private final Collection<? extends SettingsEditorFragment<Settings, ?>> myFragments;
   private final SettingsEditorFragment<Settings, ?> myMain;
   private DropDownLink<String> myLinkLabel;
 
-  FragmentedSettingsBuilder(Collection<SettingsEditorFragment<Settings, ?>> fragments, SettingsEditorFragment<Settings, ?> main) {
+  FragmentedSettingsBuilder(Collection<? extends SettingsEditorFragment<Settings, ?>> fragments,
+                            SettingsEditorFragment<Settings, ?> main, @NotNull Disposable disposable) {
     myFragments = fragments;
     myMain = main;
+    myDisposable = disposable;
   }
 
   @Override
-  public Collection<SettingsEditor<Settings>> getEditors() {
+  public @NotNull Collection<SettingsEditor<Settings>> getEditors() {
     return new ArrayList<>(myFragments);
   }
 
   @Override
-  public JComponent createCompoundEditor() {
+  public @NotNull JComponent createCompoundEditor() {
     if (myMain == null) {
       myPanel.setBorder(JBUI.Borders.emptyLeft(5));
       addLine(new JSeparator());
@@ -115,7 +126,7 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     addLine(component, TOP_INSET, 0, 0);
   }
 
-  private void buildBeforeRun(Collection<SettingsEditorFragment<Settings, ?>> fragments) {
+  private void buildBeforeRun(Collection<? extends SettingsEditorFragment<Settings, ?>> fragments) {
     SettingsEditorFragment<Settings, ?> beforeRun = ContainerUtil.find(fragments, fragment -> fragment.getCommandLinePosition() == -2);
     if (beforeRun != null) {
       addLine(beforeRun.getComponent(), TOP_INSET, 0, TOP_INSET * 2);
@@ -123,7 +134,7 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     }
   }
 
-  private JComponent buildHeader(Collection<SettingsEditorFragment<Settings, ?>> fragments) {
+  private JComponent buildHeader(Collection<? extends SettingsEditorFragment<Settings, ?>> fragments) {
     JPanel panel = new JPanel(new BorderLayout());
     panel.setBorder(JBUI.Borders.empty(5, 0));
     SettingsEditorFragment<Settings, ?> label = ContainerUtil.find(fragments, fragment -> fragment.getCommandLinePosition() == -1);
@@ -139,9 +150,11 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     myLinkLabel.setBorder(JBUI.Borders.emptyLeft(5));
     JPanel linkPanel = new JPanel(new BorderLayout());
     linkPanel.add(myLinkLabel, BorderLayout.CENTER);
-    CustomShortcutSet shortcut = KeymapUtil.getMnemonicAsShortcut(TextWithMnemonic.parse(message).getMnemonic());
-    if (shortcut != null) {
-      JLabel shortcutLabel = new JLabel(KeymapUtil.getFirstKeyboardShortcutText(shortcut));
+    CustomShortcutSet shortcutSet = KeymapUtil.getMnemonicAsShortcut(TextWithMnemonic.parse(message).getMnemonic());
+    if (shortcutSet != null) {
+      List<String> list = ContainerUtil.map(shortcutSet.getShortcuts(), shortcut -> KeymapUtil.getShortcutText(shortcut));
+      list.sort(Comparator.comparingInt(String::length));
+      JLabel shortcutLabel = new JLabel(list.get(0));
       shortcutLabel.setEnabled(false);
       shortcutLabel.setBorder(JBUI.Borders.empty(0, 5));
       linkPanel.add(shortcutLabel, BorderLayout.EAST);
@@ -151,31 +164,58 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
   }
 
   private void registerShortcuts() {
-    for (AnAction action : buildGroup().getChildActionsOrStubs()) {
-      ShortcutSet shortcutSet = ActionUtil.getMnemonicAsShortcut(action);
-      if (shortcutSet != null && action instanceof ToggleFragmentAction) {
-        action.registerCustomShortcutSet(shortcutSet, null);
+    for (AnAction action : buildGroup(new Ref<>()).getChildActionsOrStubs()) {
+      ShortcutSet shortcutSet = action.getShortcutSet();
+      if (shortcutSet.getShortcuts().length > 0 && action instanceof ToggleFragmentAction) {
         new AnAction(action.getTemplateText()) {
           @Override
           public void actionPerformed(@NotNull AnActionEvent e) {
-            ((ToggleFragmentAction)action).myFragment.toggle(true); // show or set focus
+            SettingsEditorFragment<?, ?> fragment = ((ToggleFragmentAction)action).myFragment;
+            fragment.toggle(true, e); // show or set focus
+            IdeFocusManager.getGlobalInstance().requestFocus(fragment.getEditorComponent(), false);
           }
-        }.registerCustomShortcutSet(shortcutSet, myPanel.getRootPane());
+        }.registerCustomShortcutSet(shortcutSet, myPanel.getRootPane(), myDisposable);
       }
     }
   }
 
   private JBPopup showOptions() {
     DataContext dataContext = DataManager.getInstance().getDataContext(myLinkLabel);
-    ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(IdeBundle.message("popup.title.add.run.options"),
-                                                                          buildGroup(),
+    Ref<JComponent> lastSelected = new Ref<>();
+    DefaultActionGroup group = buildGroup(lastSelected);
+    Runnable callback = () -> {
+      ApplicationManager.getApplication().invokeLater(() -> {
+        JComponent component = lastSelected.get();
+        if (component != null && !(component instanceof JPanel) && !(component instanceof JLabel)) {
+          IdeFocusManager.getGlobalInstance().requestFocus(component, false);
+        }
+      });
+    };
+    String title = myMain != null ? IdeBundle.message("popup.title.add.group.options", myMain.getGroup()) :
+                   IdeBundle.message("popup.title.add.run.options");
+    ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(title,
+                                                                          group,
                                                                           dataContext,
-                                                                          JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true);
+                                                                          JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true,
+                                                                          callback, -1);
+    popup.setHandleAutoSelectionBeforeShow(true);
+    popup.addListSelectionListener(e -> {
+      JBPopup jbPopup = PopupUtil.getPopupContainerFor((Component)e.getSource());
+      AnActionHolder data = (AnActionHolder)PlatformDataKeys.SELECTED_ITEM.getData((DataProvider)e.getSource());
+      jbPopup.setAdText(getHint(data == null ? null : data.getAction()), SwingConstants.LEFT);
+    });
     return popup;
   }
 
   @NotNull
-  private DefaultActionGroup buildGroup(List<SettingsEditorFragment<Settings, ?>> fragments) {
+  private static @NlsContexts.PopupAdvertisement String getHint(AnAction action) {
+    return (action != null && StringUtil.isNotEmpty(action.getTemplatePresentation().getDescription())) ?
+           action.getTemplatePresentation().getDescription() : "";
+  }
+
+  @NotNull
+  private DefaultActionGroup buildGroup(List<? extends SettingsEditorFragment<Settings, ?>> fragments,
+                                        Ref<? super JComponent> lastSelected) {
     fragments.sort(Comparator.comparingInt(SettingsEditorFragment::getMenuPosition));
     DefaultActionGroup actionGroup = new DefaultActionGroup();
     String group = null;
@@ -189,10 +229,15 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
         actionGroup.add(customGroup);
         continue;
       }
-      actionGroup.add(new ToggleFragmentAction(fragment));
+      ToggleFragmentAction action = new ToggleFragmentAction(fragment, lastSelected);
+      ShortcutSet shortcutSet = ActionUtil.getMnemonicAsShortcut(action);
+      if (shortcutSet != null) {
+        action.registerCustomShortcutSet(shortcutSet, null);
+      }
+      actionGroup.add(action);
       List<SettingsEditorFragment<Settings, ?>> children = fragment.getChildren();
       if (!children.isEmpty()) {
-        DefaultActionGroup childGroup = buildGroup(children);
+        DefaultActionGroup childGroup = buildGroup(children, lastSelected);
         childGroup.setPopup(true);
         childGroup.getTemplatePresentation().setText(fragment.getChildrenGroupName());
         actionGroup.add(childGroup);
@@ -201,11 +246,16 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     return actionGroup;
   }
 
-  private DefaultActionGroup buildGroup() {
-    return buildGroup(ContainerUtil.filter(myFragments, fragment -> fragment.getName() != null));
+  private DefaultActionGroup buildGroup(Ref<? super JComponent> lastSelected) {
+    DefaultActionGroup group = buildGroup(ContainerUtil.filter(myFragments, fragment -> fragment.getName() != null), lastSelected);
+    if (myMain != null) {
+      group.add(Separator.create(), Constraints.FIRST);
+      group.add(new ToggleFragmentAction(myMain, lastSelected), Constraints.FIRST);
+    }
+    return group;
   }
 
-  private List<SettingsEditorFragment<Settings, ?>> restoreGroups(List<SettingsEditorFragment<Settings, ?>> fragments) {
+  private List<SettingsEditorFragment<Settings, ?>> restoreGroups(List<? extends SettingsEditorFragment<Settings, ?>> fragments) {
     ArrayList<SettingsEditorFragment<Settings, ?>> result = new ArrayList<>();
     for (SettingsEditorFragment<Settings, ?> fragment : fragments) {
       String group = fragment.getGroup();
@@ -215,11 +265,11 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     return result;
   }
 
-  private void buildCommandLinePanel(Collection<SettingsEditorFragment<Settings, ?>> fragments) {
+  private void buildCommandLinePanel(Collection<? extends SettingsEditorFragment<Settings, ?>> fragments) {
     List<SettingsEditorFragment<Settings, ?>> list = ContainerUtil.filter(fragments, fragment -> fragment.getCommandLinePosition() > 0);
     if (list.isEmpty()) return;
     fragments.removeAll(list);
-    CommandLinePanel panel = new CommandLinePanel(list);
+    CommandLinePanel panel = new CommandLinePanel(list, myDisposable);
     addLine(panel, 0, -panel.getLeftInset(), TOP_INSET);
   }
 
@@ -231,12 +281,19 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
     return wrapped != null ? getLeftInset(wrapped) : 0;
   }
 
-  private static final class ToggleFragmentAction extends ToggleAction {
+  private static final class ToggleFragmentAction extends ToggleAction implements DumbAware {
     private final SettingsEditorFragment<?, ?> myFragment;
+    private final Ref<? super JComponent> myLastSelected;
 
-    private ToggleFragmentAction(SettingsEditorFragment<?, ?> fragment) {
+    private ToggleFragmentAction(SettingsEditorFragment<?, ?> fragment, Ref<? super JComponent> lastSelected) {
       super(fragment.getName());
       myFragment = fragment;
+      myLastSelected = lastSelected;
+      getTemplatePresentation().setDescription(fragment.getActionHint());
+
+      if (fragment.getActionDescription() != null) {
+        getTemplatePresentation().putClientProperty(Presentation.PROP_VALUE, fragment.getActionDescription());
+      }
     }
 
     @Override
@@ -246,7 +303,10 @@ public class FragmentedSettingsBuilder<Settings> implements CompositeSettingsBui
 
     @Override
     public void setSelected(@NotNull AnActionEvent e, boolean state) {
-      myFragment.toggle(state);
+      myFragment.toggle(state, e);
+      if (state) {
+        myLastSelected.set(myFragment.getEditorComponent());
+      }
     }
 
     @Override

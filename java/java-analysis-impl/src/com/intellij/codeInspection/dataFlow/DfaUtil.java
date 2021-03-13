@@ -1,11 +1,13 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInsight.ExpressionUtil;
 import com.intellij.codeInsight.Nullability;
 import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
 import com.intellij.codeInspection.dataFlow.types.DfReferenceType;
+import com.intellij.codeInspection.dataFlow.types.DfTypes;
 import com.intellij.codeInspection.dataFlow.value.*;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.psi.*;
 import com.intellij.psi.controlFlow.DefUseUtil;
 import com.intellij.psi.impl.source.resolve.JavaResolveUtil;
@@ -23,6 +25,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
 import static com.intellij.psi.CommonClassNames.JAVA_UTIL_COLLECTIONS;
@@ -32,7 +35,6 @@ import static com.intellij.util.ObjectUtils.tryCast;
  * @author Gregory.Shrago
  */
 public final class DfaUtil {
-
   public static @NotNull Collection<PsiExpression> getVariableValues(@Nullable PsiVariable variable, @Nullable PsiElement context) {
     if (variable == null || context == null) return Collections.emptyList();
 
@@ -180,7 +182,7 @@ public final class DfaUtil {
     if (body == null) return Nullability.UNKNOWN;
 
     final DataFlowRunner dfaRunner = new DataFlowRunner(owner.getProject());
-    class BlockNullabilityVisitor extends StandardInstructionVisitor {
+    final class BlockNullabilityVisitor extends StandardInstructionVisitor {
       boolean hasNulls = false;
       boolean hasNotNulls = false;
       boolean hasUnknowns = false;
@@ -294,8 +296,9 @@ public final class DfaUtil {
     return Integer.MAX_VALUE; // accessed after initialization or at unknown moment
   }
 
-  public static boolean hasInitializationHacks(@NotNull PsiField field) {
-    PsiClass containingClass = field.getContainingClass();
+  public static boolean hasInitializationHacks(@NotNull PsiVariable var) {
+    if (!(var instanceof PsiField)) return false;
+    PsiClass containingClass = ((PsiField)var).getContainingClass();
     return containingClass != null && System.class.getName().equals(containingClass.getQualifiedName());
   }
 
@@ -358,12 +361,11 @@ public final class DfaUtil {
   public static DfaValue boxUnbox(DfaValue value, @Nullable PsiType type) {
     if (TypeConversionUtil.isPrimitiveWrapper(type)) {
       if (TypeConversionUtil.isPrimitiveAndNotNull(value.getType())) {
-        DfaValue boxed = value.getFactory().getBoxedFactory().createBoxed(value, type);
-        return boxed == null ? value.getFactory().getUnknown() : boxed;
+        return value.getFactory().getWrapperFactory().createWrapper(DfTypes.typedObject(type, Nullability.NOT_NULL), SpecialField.UNBOX, value);
       }
     }
     if (TypeConversionUtil.isPrimitiveAndNotNull(type)) {
-      if (value instanceof DfaBoxedValue || TypeConversionUtil.isPrimitiveWrapper(value.getType())) {
+      if (value instanceof DfaWrappedValue || TypeConversionUtil.isPrimitiveWrapper(value.getType())) {
         return SpecialField.UNBOX.createValue(value.getFactory(), value);
       }
       if (value.getDfType() instanceof DfReferenceType) {
@@ -409,5 +411,25 @@ public final class DfaUtil {
   public static boolean isNaN(Object value) {
     return value instanceof Double && ((Double)value).isNaN() ||
            value instanceof Float && ((Float)value).isNaN();
+  }
+
+  /**
+   * @param poset input poset (mutable)
+   * @param predicate non-strict partial order over the input poset
+   * @param <T> type of poset elements
+   * @return the longest strong upwards antichain contained in the poset (input poset object with some elements removed)   
+   */
+  public static <T, C extends Collection<T>> C upwardsAntichain(@NotNull C poset, @NotNull BiPredicate<T, T> predicate) {
+    for (Iterator<T> iterator = poset.iterator(); iterator.hasNext(); ) {
+      T left = iterator.next();
+      for (T right : poset) {
+        ProgressManager.checkCanceled();
+        if (right != left && predicate.test(left, right)) {
+          iterator.remove();
+          break;
+        }
+      }
+    }
+    return poset;
   }
 }

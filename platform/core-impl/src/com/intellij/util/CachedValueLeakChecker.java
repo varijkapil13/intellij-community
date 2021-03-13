@@ -15,6 +15,7 @@ import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ref.DebugReflectionUtil;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
@@ -30,7 +31,7 @@ final class CachedValueLeakChecker {
   private static final boolean DO_CHECKS = ApplicationManager.getApplication().isUnitTestMode();
   private static final Set<String> ourCheckedKeys = ContainerUtil.newConcurrentSet();
 
-  static void checkProvider(@NotNull CachedValueProvider<?> provider, @NotNull Key<?> key, @NotNull UserDataHolder userDataHolder) {
+  static void checkProviderDoesNotLeakPSI(@NotNull CachedValueProvider<?> provider, @NotNull Key<?> key, @NotNull UserDataHolder userDataHolder) {
     if (!DO_CHECKS || ApplicationInfoImpl.isInStressTest()) return;
     if (!ourCheckedKeys.add(key.toString())) return; // store strings because keys are created afresh in each (test) project
 
@@ -54,15 +55,10 @@ final class CachedValueLeakChecker {
       }
       return true;
     };
-    Map<Object, String> roots = Collections.singletonMap(root, "CachedValueProvider "+key);
-    DebugReflectionUtil.walkObjects(5, roots, PsiElement.class, shouldExamineValue, (value, backLink) -> {
-      if (value instanceof PsiElement) {
-        LOG.error(
-          "Incorrect CachedValue use. Provider references PSI, causing memory leaks and possible invalid element access, provider=" +
-          root + "\n" + backLink);
-        return false;
-      }
-      return true;
+    Map<Object, @NonNls String> roots = Collections.singletonMap(root, "CachedValueProvider " + key);
+    DebugReflectionUtil.walkObjects(5, roots, PsiElement.class, shouldExamineValue, (__, backLink) -> {
+      LOG.error("Provider '" + root + "' is retaining PSI, causing memory leaks and possible invalid element access.\n" + backLink);
+      return false;
     });
   }
 }

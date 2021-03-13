@@ -1,9 +1,8 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.actions;
 
 import com.intellij.model.ModelPatch;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
@@ -35,7 +34,7 @@ public final class VcsFacadeImpl extends VcsFacade {
 
   @NotNull
   public static VcsFacadeImpl getVcsInstance() {
-    return (VcsFacadeImpl)ServiceManager.getService(VcsFacade.class);
+    return (VcsFacadeImpl)ApplicationManager.getApplication().getService(VcsFacade.class);
   }
 
   @Override
@@ -125,7 +124,7 @@ public final class VcsFacadeImpl extends VcsFacade {
 
   @NotNull
   private static List<PsiFile> getChangedFiles(@NotNull final Project project, @NotNull Collection<? extends Change> changes) {
-    Function<Change, PsiFile> changeToPsiFileMapper = new Function<Change, PsiFile>() {
+    Function<Change, PsiFile> changeToPsiFileMapper = new Function<>() {
       private final PsiManager myPsiManager = PsiManager.getInstance(project);
 
       @Override
@@ -312,9 +311,7 @@ public final class VcsFacadeImpl extends VcsFacade {
     boolean isUnderVcs = VcsUtil.isFileUnderVcs(project, VcsUtil.getFilePath(file.getVirtualFile()));
     if (!isUnderVcs) return true;
 
-    ChangeListManagerImpl changeListManager = ChangeListManagerImpl.getInstanceImpl(project);
-    List<VirtualFile> unversionedFiles = changeListManager.getUnversionedFiles();
-    if (unversionedFiles.contains(file.getVirtualFile())) {
+    if (ChangeListManager.getInstance(project).isUnversioned(file.getVirtualFile())) {
       return true;
     }
 

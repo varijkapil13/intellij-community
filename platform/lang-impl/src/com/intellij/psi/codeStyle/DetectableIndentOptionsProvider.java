@@ -19,6 +19,7 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiBinaryFile;
@@ -154,7 +155,7 @@ public class DetectableIndentOptionsProvider extends FileIndentOptionsProvider {
   }
 
   private static final class ShowIndentDetectionOptionAction extends DumbAwareAction {
-    private ShowIndentDetectionOptionAction(@Nullable String text) {
+    private ShowIndentDetectionOptionAction(@Nullable @NlsActions.ActionText String text) {
       super(text);
     }
 
@@ -249,9 +250,8 @@ public class DetectableIndentOptionsProvider extends FileIndentOptionsProvider {
       return actions.toArray(AnAction.EMPTY_ARRAY);
     }
 
-    @Nullable
     @Override
-    public AnAction createDisableAction(@NotNull Project project) {
+    public @NotNull AnAction createDisableAction(@NotNull Project project) {
       return DumbAwareAction.create(
         ApplicationBundle.message("code.style.indent.detector.disable"),
         e -> {

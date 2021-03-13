@@ -3,12 +3,10 @@ package com.intellij.openapi.roots.ui.configuration.classpath
 
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.impl.ModuleConfigurationStateImpl
-import com.intellij.openapi.roots.LibraryOrderEntry
-import com.intellij.openapi.roots.ModifiableRootModel
-import com.intellij.openapi.roots.ModuleOrderEntry
-import com.intellij.openapi.roots.ModuleRootModificationUtil
+import com.intellij.openapi.roots.*
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider
+import com.intellij.openapi.roots.ui.configuration.ProjectStructureConfigurable
 import com.intellij.testFramework.JavaModuleTestCase
 import com.intellij.testFramework.TestActionEvent
 import junit.framework.TestCase
@@ -16,6 +14,11 @@ import junit.framework.TestCase
 class InlineModuleDependencyActionTest : JavaModuleTestCase() {
 
   override fun isRunInWriteAction(): Boolean = true
+
+  override fun tearDown() {
+    ProjectStructureConfigurable.getInstance(myProject).context.modulesConfigurator.disposeUIResources()
+    super.tearDown()
+  }
 
   fun `test inline module with module library`() {
     val newCreatedModule = createModule("My Module")
@@ -87,12 +90,20 @@ class InlineModuleDependencyActionTest : JavaModuleTestCase() {
   }
 
   fun `test inline module with submodule`() {
+    doTestInlineModuleWithSubModule(DependencyScope.COMPILE)
+  }
+
+  fun `test inline module with submodule with runtime scope`() {
+    doTestInlineModuleWithSubModule(DependencyScope.RUNTIME)
+  }
+
+  private fun doTestInlineModuleWithSubModule(scope: DependencyScope) {
     val newCreatedModule = createModule("My Module")
     val submodule = createModule("My Submodule")
 
     val submoduleEntry = newCreatedModule.update { it.addModuleOrderEntry(submodule) }
 
-    val moduleOrderEntry = module.update { it.addModuleOrderEntry(newCreatedModule) }
+    val moduleOrderEntry = module.update { it.addModuleOrderEntry(newCreatedModule).also { dep -> dep.scope = scope } }
 
     val inlinedModule = module.update { modifiableRootModel ->
       val classPathPanel = setUpClasspathPanel(modifiableRootModel, moduleOrderEntry)
@@ -101,16 +112,18 @@ class InlineModuleDependencyActionTest : JavaModuleTestCase() {
       action.actionPerformed(TestActionEvent())
 
       val orderEntries = modifiableRootModel.orderEntries
-      TestCase.assertEquals(3, orderEntries.size)
+      assertEquals(3, orderEntries.size)
       orderEntries.filterIsInstance<ModuleOrderEntry>().first()
     }
 
-    TestCase.assertEquals(submoduleEntry.moduleName, inlinedModule.moduleName)
+    assertEquals(submoduleEntry.moduleName, inlinedModule.moduleName)
+    assertEquals(scope, inlinedModule.scope)
   }
 
   private fun setUpClasspathPanel(modifiableRootModel: ModifiableRootModel, entryToSelect: ModuleOrderEntry): ClasspathPanelImpl {
-    val moduleConfigurationState = object : ModuleConfigurationStateImpl(project, ModulesProvider.EMPTY_MODULES_PROVIDER) {
-      override fun getRootModel(): ModifiableRootModel = modifiableRootModel
+    val moduleConfigurationState = object : ModuleConfigurationStateImpl(project, ProjectStructureConfigurable.getInstance(myProject).context.modulesConfigurator) {
+      override fun getModifiableRootModel(): ModifiableRootModel = modifiableRootModel
+      override fun getCurrentRootModel(): ModuleRootModel = modifiableRootModel
     }
     return ClasspathPanelImpl(moduleConfigurationState).apply { selectOrderEntry(entryToSelect) }
   }

@@ -85,7 +85,7 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
                                   NativeMavenProjectHolder nativeMavenProject) {
         scheduleUpdateIndicesList();
       }
-    });
+    }, this);
   }
 
   private void scheduleUpdateIndicesList() {
@@ -105,7 +105,7 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
         }
 
         List<MavenIndex> newProjectIndices;
-        MavenIndicesManager mavenIndicesManager = MavenIndicesManager.getInstance();
+        MavenIndicesManager mavenIndicesManager = MavenIndicesManager.getInstance(myProject);
         if (remoteRepositoriesIdsAndUrls.isEmpty()) {
           newProjectIndices = new ArrayList<>();
         }
@@ -152,20 +152,21 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
    * @deprecated use {@link #getOfflineSearchService()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public List<MavenIndex> getIndices() {
     return new ArrayList<>(myProjectIndices);
   }
 
   public void scheduleUpdateAll() {
-    MavenIndicesManager.getInstance().scheduleUpdate(myProject, myProjectIndices);
+    MavenIndicesManager.getInstance(myProject).scheduleUpdate(myProject, myProjectIndices);
   }
 
   public void scheduleUpdate(List<MavenIndex> indices) {
-    MavenIndicesManager.getInstance().scheduleUpdate(myProject, indices);
+    MavenIndicesManager.getInstance(myProject).scheduleUpdate(myProject, indices);
   }
 
   public MavenIndicesManager.IndexUpdatingState getUpdatingState(MavenSearchIndex index) {
-    return MavenIndicesManager.getInstance().getUpdatingState(index);
+    return MavenIndicesManager.getInstance(myProject).getUpdatingState(index);
   }
 
   private MavenProjectsManager getMavenProjectManager() {
@@ -188,6 +189,7 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
    * @deprecated use {@link OfflineSearchService#findGroupCandidates} or{@link OfflineSearchService#findByTemplate} instead
    **/
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public Set<String> getGroupIds() {
     return getGroupIds("");
   }
@@ -212,6 +214,7 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
    * @deprecated use {@link OfflineSearchService#findArtifactCandidates} or {@link OfflineSearchService#findByTemplate} instead
    **/
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public Set<String> getArtifactIds(String groupId) {
     ProgressIndicatorProvider.checkCanceled();
     Set<String> result = new HashSet<>();
@@ -229,6 +232,7 @@ public final class MavenProjectIndicesManager extends MavenSimpleProjectComponen
    * @deprecated use {@link OfflineSearchService#findAllVersions or {@link OfflineSearchService#findByTemplate} instead
    **/
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public Set<String> getVersions(String groupId, String artifactId) {
     ProgressIndicatorProvider.checkCanceled();
     Set<String> result = new HashSet<>();

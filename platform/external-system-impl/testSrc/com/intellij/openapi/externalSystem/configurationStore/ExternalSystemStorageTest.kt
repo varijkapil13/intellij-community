@@ -6,16 +6,14 @@ import com.intellij.facet.FacetType
 import com.intellij.facet.mock.MockFacetType
 import com.intellij.facet.mock.MockSubFacetType
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.AppUIExecutor
-import com.intellij.openapi.application.WriteAction
-import com.intellij.openapi.application.appSystemDir
+import com.intellij.openapi.application.*
 import com.intellij.openapi.application.ex.PathManagerEx
 import com.intellij.openapi.application.impl.coroutineDispatchingContext
-import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.externalSystem.model.project.ModuleData
 import com.intellij.openapi.externalSystem.model.project.ProjectData
+import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProviderImpl
 import com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsDataStorage
 import com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManagerImpl
 import com.intellij.openapi.module.Module
@@ -45,12 +43,18 @@ import com.intellij.testFramework.*
 import com.intellij.testFramework.rules.ProjectModelRule
 import com.intellij.util.io.*
 import com.intellij.util.ui.UIUtil
+import com.intellij.workspaceModel.storage.bridgeEntities.ModuleEntity
+import com.intellij.workspaceModel.storage.bridgeEntities.externalSystemOptions
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.*
-import org.junit.Assert.assertFalse
+import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.ClassRule
+import org.junit.Rule
+import org.junit.Test
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -93,6 +97,42 @@ class ExternalSystemStorageTest {
                                                               ModuleTypeId.JAVA_MODULE)
     ModuleRootModificationUtil.addContentRoot(module, projectDir.systemIndependentPath)
     setExternalSystemOptions(module, projectDir)
+  }
+
+  @Test
+  fun `applying external system options twice`() {
+    createProjectAndUseInLoadComponentStateMode(tempDirManager, directoryBased = true, useDefaultProjectSettings = false) { project ->
+      runBlocking {
+        withContext(AppUIExecutor.onWriteThread().coroutineDispatchingContext()) {
+          runWriteAction {
+            val projectDir = project.stateStore.directoryStorePath!!.parent
+            val module = ModuleManager.getInstance(project).newModule(projectDir.resolve("test.iml").systemIndependentPath,
+                                                                      ModuleTypeId.JAVA_MODULE)
+            ModuleRootModificationUtil.addContentRoot(module, projectDir.systemIndependentPath)
+
+
+            val propertyManager = ExternalSystemModulePropertyManager.getInstance(module)
+
+            val systemId = ProjectSystemId("GRADLE")
+            val moduleData = ModuleData("test", systemId, "", "", "", projectDir.systemIndependentPath).also {
+              it.group = "group"
+              it.version = "42.0"
+            }
+            val projectData = ProjectData(systemId, "", "", projectDir.systemIndependentPath)
+
+
+            val modelsProvider = IdeModifiableModelsProviderImpl(project)
+
+            propertyManager.setExternalOptions(systemId, moduleData, projectData)
+            propertyManager.setExternalOptions(systemId, moduleData, projectData)
+
+            val externalOptionsFromBuilder = modelsProvider.actualStorageBuilder
+              .entities(ModuleEntity::class.java).singleOrNull()?.externalSystemOptions
+            assertEquals("GRADLE", externalOptionsFromBuilder?.externalSystem)
+          }
+        }
+      }
+    }
   }
 
   @Test
@@ -235,12 +275,58 @@ class ExternalSystemStorageTest {
   @Test
   fun `save imported facet in imported module`() = saveProjectInExternalStorageAndCheckResult("importedFacetInImportedModule") { project, projectDir ->
     val imported = ModuleManager.getInstance(project).newModule(projectDir.resolve("imported.iml").systemIndependentPath, ModuleTypeId.JAVA_MODULE)
-    val facetManager = FacetManager.getInstance(imported)
-    val model = facetManager.createModifiableModel()
-    val source = ExternalProjectSystemRegistry.getInstance().getSourceById(ExternalProjectSystemRegistry.MAVEN_EXTERNAL_SOURCE_ID)
-    model.addFacet(facetManager.createFacet(MockFacetType.getInstance(), "imported", null), source)
-    model.commit()
+    addFacet(imported, ExternalProjectSystemRegistry.MAVEN_EXTERNAL_SOURCE_ID, "imported")
     ExternalSystemModulePropertyManager.getInstance(imported).setMavenized(true)
+  }
+
+  private fun addFacet(module: Module, externalSystemId: String?, facetName: String) {
+    val facetManager = FacetManager.getInstance(module)
+    val model = facetManager.createModifiableModel()
+    val source = externalSystemId?.let { ExternalProjectSystemRegistry.getInstance().getSourceById(it) }
+    model.addFacet(facetManager.createFacet(MockFacetType.getInstance(), facetName, null), source)
+    runWriteActionAndWait { model.commit() }
+  }
+
+  @Test
+  fun `edit imported facet in internal storage with regular facet`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("singleModuleFromExternalSystemInInternalStorage", "mixedFacetsInInternalStorage") { project ->
+      val module = ModuleManager.getInstance(project).modules.single()
+      addFacet(module, null, "regular")
+      runBlocking { project.stateStore.save() }
+      addFacet(module, "GRADLE", "imported")
+    }
+  }
+
+  @Test
+  fun `edit regular facet in internal storage with imported facet`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("singleModuleFromExternalSystemInInternalStorage", "mixedFacetsInInternalStorage") { project ->
+      val module = ModuleManager.getInstance(project).modules.single()
+      addFacet(module, "GRADLE", "imported")
+      runBlocking { project.stateStore.save() }
+      addFacet(module, null, "regular")
+    }
+  }
+
+  @Test
+  fun `edit imported facet in external storage with regular facet`() {
+    loadModifySaveAndCheck("singleModuleFromExternalSystem", "mixedFacetsInExternalStorage") { project ->
+      val module = ModuleManager.getInstance(project).modules.single()
+      addFacet(module, null, "regular")
+      runBlocking { project.stateStore.save() }
+      addFacet(module, "GRADLE", "imported")
+    }
+  }
+
+  @Test
+  fun `edit regular facet in external storage with imported facet`() {
+    loadModifySaveAndCheck("singleModuleFromExternalSystem", "mixedFacetsInExternalStorage") { project ->
+      val module = ModuleManager.getInstance(project).modules.single()
+      addFacet(module, "GRADLE", "imported")
+      runBlocking { project.stateStore.save() }
+      addFacet(module, null, "regular")
+    }
   }
 
   @Test
@@ -336,6 +422,76 @@ class ExternalSystemStorageTest {
     }
   }
 
+  @Test
+  fun `remove regular module with enabled external storage`() {
+    loadModifySaveAndCheck("twoRegularModules", "twoRegularModulesAfterRemoval") { project ->
+      val moduleManager = ModuleManager.getInstance(project)
+      val module = moduleManager.findModuleByName("test2")
+      assertThat(module).isNotNull
+      runWriteActionAndWait {
+        moduleManager.disposeModule(module!!)
+      }
+    }
+  }
+
+  @Test
+  fun `change storeExternally property and save libraries to internal storage`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("libraryInExternalStorage", "libraryAfterStoreExternallyPropertyChanged") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+    }
+  }
+
+  @Test
+  fun `change storeExternally property several times`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("libraryInExternalStorage", "libraryAfterStoreExternallyPropertyChanged") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+      runBlocking { project.stateStore.save() }
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
+      runBlocking { project.stateStore.save() }
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+    }
+  }
+
+  @Test
+  fun `clean up iml file if we start store project model at external storage`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("singleModule", "singleModuleAfterStoreExternallyPropertyChanged") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+      runBlocking { project.stateStore.save() }
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
+    }
+  }
+
+  @Test
+  fun `test facet and libraries saved in internal store after IDE reload`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("singleModuleFacetAndLibFromExternalSystemInInternalStorage", "singleModuleFacetAndLibFromExternalSystem") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
+    }
+  }
+
+  @Test
+  fun `clean up facet tag in iml file if we start store project model at external storage`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("importedFacetInImportedModule", "importedFacetAfterStoreExternallyPropertyChanged") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+      runBlocking { project.stateStore.save() }
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
+    }
+  }
+
+  @Test
+  fun `clean up external_build_system at saving data at idea folder`() {
+    assumeTrue(ProjectModelRule.isWorkspaceModelEnabled)
+    loadModifySaveAndCheck("singleModuleWithLibrariesInInternalStorage", "singleModuleWithLibrariesInInternalStorage") { project ->
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
+      runBlocking { project.stateStore.save() }
+      ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+    }
+  }
+
   @Before
   fun registerFacetType() {
     WriteAction.runAndWait<RuntimeException> {
@@ -402,7 +558,7 @@ class ExternalSystemStorageTest {
       cacheDir.toFile().assertMatches(directoryContentOf(expectedCacheDir), FileTextMatcher.ignoreBlankLines())
     }
     else {
-      assertFalse("$cacheDir doesn't exist", Files.exists(cacheDir))
+      assertTrue("$cacheDir doesn't exist", !Files.exists(cacheDir) || isFolderWithoutFiles(cacheDir.toFile()))
     }
   }
 
@@ -427,7 +583,7 @@ class ExternalSystemStorageTest {
       }
       val testCacheFilesDir = testDataRoot.resolve(testDataDirName).resolve("cache").toFile()
       if (testCacheFilesDir.exists()) {
-        val cachePath = appSystemDir.resolve("external_build_system").resolve(getProjectCacheFileName(projectDir.absolutePath))
+        val cachePath = appSystemDir.resolve("external_build_system").resolve(getProjectCacheFileName(dir.toNioPath()))
         FileUtil.copyDir(testCacheFilesDir, cachePath.toFile())
       }
       VfsUtil.markDirtyAndRefresh(false, true, true, dir)
@@ -441,4 +597,6 @@ class ExternalSystemStorageTest {
       }
     }
   }
+
+  private fun isFolderWithoutFiles(root: File): Boolean = root.walk().none { it.isFile }
 }

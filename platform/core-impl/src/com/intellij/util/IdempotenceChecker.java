@@ -1,6 +1,8 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util;
 
+import com.intellij.model.Symbol;
+import com.intellij.model.SymbolResolveResult;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
@@ -15,10 +17,7 @@ import com.intellij.psi.ResolveResult;
 import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
@@ -98,7 +97,7 @@ public final class IdempotenceChecker {
                                                  @NotNull Computable<? extends T> recomputeValue) {
     ResultWithLog<T> rwl = computeWithLogging(recomputeValue);
     T freshest = rwl.result;
-    String msg = "\n\nRecomputation gives " + objAndClass(freshest);
+    @NonNls String msg = "\n\nRecomputation gives " + objAndClass(freshest);
     if (checkValueEquivalence(existing, freshest) == null) {
       msg += " which is equivalent to 'existing'";
     }
@@ -129,7 +128,7 @@ public final class IdempotenceChecker {
     try {
       int start = threadLog.size();
       T result = recomputeValue.compute();
-      return new ResultWithLog<>(result, threadLog.subList(start, threadLog.size()));
+      return new ResultWithLog<>(result, new ArrayList<>(threadLog.subList(start, threadLog.size())));
     }
     finally {
       if (outermost) {
@@ -138,7 +137,7 @@ public final class IdempotenceChecker {
     }
   }
 
-  private static String objAndClass(Object o) {
+  private static @NonNls String objAndClass(Object o) {
     if (o == null) return "null";
 
     String s = o.toString();
@@ -181,6 +180,9 @@ public final class IdempotenceChecker {
       }
       return whichIsField("size", existing, fresh, checkCollectionSizes(((Map<?,?>)existing).size(), ((Map<?,?>)fresh).size()));
     }
+    if (isExpectedToHaveSaneEquals(existing) && !existing.equals(fresh)) {
+      return reportProblem(existing, fresh);
+    }
     if (existing instanceof PsiNamedElement) {
       return checkPsiEquivalence((PsiElement)existing, (PsiElement)fresh);
     }
@@ -194,9 +196,6 @@ public final class IdempotenceChecker {
       }
       return null;
     }
-    if (isExpectedToHaveSaneEquals(existing) && !existing.equals(fresh)) {
-      return reportProblem(existing, fresh);
-    }
     return null;
   }
 
@@ -208,7 +207,7 @@ public final class IdempotenceChecker {
     return o instanceof LinkedHashSet || o instanceof SortedSet;
   }
 
-  private static String whichIsField(@NotNull String field, @NotNull Object existing, @NotNull Object fresh, @Nullable String msg) {
+  private static String whichIsField(@NotNull @NonNls String field, @NotNull Object existing, @NotNull Object fresh, @Nullable String msg) {
     return msg == null ? null : appendDetail(msg, "which is " + field + " of " + existing + " and " + fresh);
   }
 
@@ -236,7 +235,9 @@ public final class IdempotenceChecker {
   }
 
   private static boolean isExpectedToHaveSaneEquals(@NotNull Object existing) {
-    return existing instanceof Comparable;
+    return existing instanceof Comparable
+           || existing instanceof Symbol
+           || existing instanceof SymbolResolveResult;
   }
 
   @Contract("null,_->!null;_,null->!null")
@@ -319,7 +320,7 @@ public final class IdempotenceChecker {
                         objAndClass(o1) + " != " + objAndClass(o2));
   }
 
-  private static String appendDetail(String message, String detail) {
+  private static String appendDetail(@NonNls String message, @NonNls String detail) {
     return message + "\n  " + StringUtil.trimLog(detail, 10_000);
   }
 
@@ -381,14 +382,14 @@ public final class IdempotenceChecker {
    * Log a message to help debug {@link #checkEquivalence} failures. When such a failure occurs, the computation can be re-run again
    * with this logging enabled, and the collected log will be included into exception message.
    */
-  public static void logTrace(@NotNull String message) {
+  public static void logTrace(@NotNull @NonNls String message) {
     List<String> log = ourLog.get();
     if (log != null) {
       log.add(message);
     }
   }
 
-  public static class ResultWithLog<T> {
+  public static final class ResultWithLog<T> {
     private final T result;
     private final List<String> log;
 

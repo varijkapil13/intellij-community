@@ -16,6 +16,7 @@
 
 package com.intellij.execution.junit2.configuration;
 
+import com.intellij.execution.JUnitBundle;
 import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.junit.JUnitConfiguration;
 import com.intellij.execution.junit.JUnitUtil;
@@ -27,12 +28,14 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.util.Consumer;
+import com.intellij.rt.execution.junit.RepeatCount;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -41,6 +44,7 @@ import javax.swing.text.PlainDocument;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 // Author: dyoma
 
@@ -72,7 +76,7 @@ public class JUnitConfigurationModel {
   }
 
 
-  private Consumer<Integer> myListener;
+  private BiConsumer<Integer, Integer> myListener;
   private int myType = -1;
   private final Object[] myJUnitDocuments = new Object[6];
   private final Project myProject;
@@ -83,17 +87,18 @@ public class JUnitConfigurationModel {
 
   public boolean setType(int type) {
     if (type == myType) return false;
+    int oldType = myType;
     if (type < 0 || type >= ourTestObjects.size()) type = CLASS;
     myType = type;
-    fireTypeChanged(type);
+    fireTypeChanged(oldType, type);
     return true;
   }
 
-  private void fireTypeChanged(final int newType) {
-    myListener.consume(newType);
+  private void fireTypeChanged(final int oldType, final int newType) {
+    myListener.accept(oldType, newType);
   }
 
-  public void setListener(final Consumer<Integer> listener) {
+  public void setListener(final BiConsumer<Integer, Integer> listener) {
     myListener = listener;
   }
 
@@ -209,7 +214,8 @@ public class JUnitConfigurationModel {
       }
     }
     else {
-      WriteCommandAction.runWriteCommandAction(myProject, () -> ((Document)document).replaceString(0, ((Document)document).getTextLength(), text));
+      WriteCommandAction
+        .runWriteCommandAction(myProject, () -> ((Document)document).replaceString(0, ((Document)document).getTextLength(), text));
     }
   }
 
@@ -217,31 +223,60 @@ public class JUnitConfigurationModel {
     setType(ourTestObjects.indexOf(testObject));
   }
 
-  @NotNull
-  public static String getKindName(int value) {
+  public static @NotNull @NlsContexts.Label String getKindName(int value) {
     switch (value) {
       case ALL_IN_PACKAGE:
-        return "All in package";
+        return JUnitBundle.message("junit.configuration.kind.all.in.package");
       case DIR:
-        return "All in directory";
+        return JUnitBundle.message("junit.configuration.kind.all.in.directory");
       case PATTERN:
-        return "Pattern";
+        return JUnitBundle.message("junit.configuration.kind.by.pattern");
       case CLASS:
-        return "Class";
+        return JUnitBundle.message("junit.configuration.kind.class");
       case METHOD:
-        return "Method";
+        return JUnitBundle.message("junit.configuration.kind.method");
       case CATEGORY:
-        return "Category";
+        return JUnitBundle.message("junit.configuration.kind.category");
       case UNIQUE_ID:
-        return "UniqueId";
+        return JUnitBundle.message("junit.configuration.kind.by.unique.id");
       case TAGS:
-        return "Tags";
+        return JUnitBundle.message("junit.configuration.kind.by.tags");
       case BY_SOURCE_POSITION:
-        return "Through source location";
+        return JUnitBundle.message("junit.configuration.kind.by.source.position");
       case BY_SOURCE_CHANGES:
-        return "Over changes in sources";
+        return JUnitBundle.message("junit.configuration.kind.by.source.changes");
     }
     throw new IllegalArgumentException(String.valueOf(value));
+  }
+
+  public static @NotNull @NlsContexts.Label String getRepeatModeName(@NotNull @NonNls String value) {
+    switch (value) {
+      case RepeatCount.ONCE:
+        return JUnitBundle.message("junit.configuration.repeat.mode.once");
+      case RepeatCount.N:
+        return JUnitBundle.message("junit.configuration.repeat.mode.n.times");
+      case RepeatCount.UNTIL_FAILURE:
+        return JUnitBundle.message("junit.configuration.repeat.mode.until.failure");
+      case RepeatCount.UNLIMITED:
+        return JUnitBundle.message("junit.configuration.repeat.mode.unlimited");
+    }
+
+    throw new IllegalArgumentException(value);
+  }
+
+  public static @NotNull @NlsContexts.Label String getForkModeName(@NotNull @NonNls String value) {
+    switch (value) {
+      case JUnitConfiguration.FORK_NONE:
+        return JUnitBundle.message("junit.configuration.fork.mode.none");
+      case JUnitConfiguration.FORK_METHOD:
+        return JUnitBundle.message("junit.configuration.fork.mode.method");
+      case JUnitConfiguration.FORK_KLASS:
+        return JUnitBundle.message("junit.configuration.fork.mode.class");
+      case JUnitConfiguration.FORK_REPEAT:
+        return JUnitBundle.message("junit.configuration.fork.mode.repeat");
+    }
+
+    throw new IllegalArgumentException(value);
   }
 
   public void reloadTestKindModel(JComboBox<Integer> comboBox, Module module) {
@@ -273,6 +308,14 @@ public class JUnitConfigurationModel {
     }
     comboBox.setModel(aModel);
     comboBox.setSelectedIndex(selectedIndex);
+  }
+
+  public boolean disableModuleClasspath(boolean wholeProjectSelected) {
+    return wholeProjectSelected && (myType == ALL_IN_PACKAGE ||
+                                    myType == PATTERN ||
+                                    myType == CATEGORY ||
+                                    myType == TAGS ||
+                                    myType == UNIQUE_ID);
   }
 }
 

@@ -7,6 +7,7 @@ import com.intellij.compiler.impl.CompileDriver;
 import com.intellij.notification.Notification;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.compiler.*;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.Key;
@@ -119,7 +120,8 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
         final String url = sourceFilePath != null ? VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL, FileUtil.toSystemIndependentName(sourceFilePath)) : null;
         final long line = message.hasLine() ? message.getLine() : -1;
         final long column = message.hasColumn() ? message.getColumn() : -1;
-        final CompilerMessage msg = myContext.createAndAddMessage(category, message.getText(), url, (int)line, (int)column, null);
+        //noinspection HardCodedStringLiteral
+        final CompilerMessage msg = myContext.createAndAddMessage(category, message.getText(), url, (int)line, (int)column, null, message.getModuleNamesList());
         if (category == CompilerMessageCategory.ERROR || kind == CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind.JPS_INFO) {
           if (category == CompilerMessageCategory.ERROR) {
             ReadAction.run(() -> informWolf(message));
@@ -184,6 +186,11 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
         view.clearOldMessages(null, sessionId);
       }
     }
+  }
+
+  @Override
+  public @NotNull ProgressIndicator getProgressIndicator() {
+    return myContext.getProgressIndicator();
   }
 
   private void informWolf(CmdlineRemoteProto.Message.BuilderMessage.@NotNull CompileMessage message) {

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.ide.ui.UISettings;
@@ -30,6 +30,7 @@ import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -40,6 +41,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.psi.ExternalChangeAction;
+import com.intellij.reference.SoftReference;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
@@ -75,7 +77,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
   private final LinkedList<PlaceInfo> myForwardPlaces = new LinkedList<>(); // LinkedList of PlaceInfo's
   private boolean myBackInProgress;
   private boolean myForwardInProgress;
-  private Object myLastGroupId;
+  private Reference<Object> myLastGroupId; // weak reference to avoid memleaks when clients pass some exotic objects as commandId
   private boolean myRegisteredBackPlaceInLastGroup;
 
   // change's navigation
@@ -158,7 +160,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
     multicaster.addDocumentListener(listener, this);
     multicaster.addCaretListener(listener, this);
 
-    FileEditorProvider.EP_FILE_EDITOR_PROVIDER.addExtensionPointListener(new ExtensionPointListener<FileEditorProvider>() {
+    FileEditorProvider.EP_FILE_EDITOR_PROVIDER.addExtensionPointListener(new ExtensionPointListener<>() {
       @Override
       public void extensionRemoved(@NotNull FileEditorProvider provider, @NotNull PluginDescriptor pluginDescriptor) {
         String editorTypeId = provider.getEditorTypeId();
@@ -168,6 +170,9 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
         }
         myBackPlaces.removeIf(clearStatePredicate);
         myForwardPlaces.removeIf(clearStatePredicate);
+        if (myCommandStartPlace != null && myCommandStartPlace.getEditorTypeId().equals(editorTypeId)) {
+          myCommandStartPlace = null;
+        }
       }
     }, this);
   }
@@ -302,8 +307,11 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
   }
 
   final void onCommandFinished(Project project, Object commandGroupId) {
-    if (!CommandMerger.canMergeGroup(commandGroupId, myLastGroupId)) myRegisteredBackPlaceInLastGroup = false;
-    myLastGroupId = commandGroupId;
+    Object lastGroupId = SoftReference.dereference(myLastGroupId);
+    if (!CommandMerger.canMergeGroup(commandGroupId, lastGroupId)) myRegisteredBackPlaceInLastGroup = false;
+    if (commandGroupId != lastGroupId) {
+      myLastGroupId = commandGroupId == null ? null : new WeakReference<>(commandGroupId);
+    }
 
     if (myCommandStartPlace != null && myCurrentCommandIsNavigation && myCurrentCommandHasMoves) {
       if (!myBackInProgress) {
@@ -547,17 +555,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
   }
 
   private static boolean removeInvalidFilesFrom(@NotNull List<PlaceInfo> backPlaces) {
-    boolean removed = false;
-    for (Iterator<PlaceInfo> iterator = backPlaces.iterator(); iterator.hasNext(); ) {
-      PlaceInfo info = iterator.next();
-      final VirtualFile file = info.myFile;
-      if (!file.isValid()) {
-        iterator.remove();
-        removed = true;
-      }
-    }
-
-    return removed;
+    return backPlaces.removeIf(info -> !info.myFile.isValid());
   }
 
   @Override
@@ -602,8 +600,8 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
     }
 
     FileEditorManagerEx editorManager = getFileEditorManager();
-    final VirtualFile file = editorManager.getFile(fileEditor);
-    LOG.assertTrue(file != null);
+    VirtualFile file = fileEditor.getFile();
+    LOG.assertTrue(file != null, fileEditor.getClass().getName() + " getFile() returned null");
     FileEditorState state = fileEditor.getState(FileEditorStateLevel.NAVIGATION);
 
     return new PlaceInfo(file, state, fileProvider.getEditorTypeId(), editorManager.getCurrentWindow(), getCaretPosition(fileEditor),
@@ -727,7 +725,7 @@ public class IdeDocumentHistoryImpl extends IdeDocumentHistory implements Dispos
     }
   }
 
-  protected void executeCommand(Runnable runnable, String name, Object groupId) {
+  protected void executeCommand(Runnable runnable, @NlsContexts.Command String name, Object groupId) {
     CommandProcessor.getInstance().executeCommand(myProject, runnable, name, groupId);
   }
 

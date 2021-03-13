@@ -1,14 +1,23 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.ui;
 
+import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SettingsEditor;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.ComponentValidator;
+import com.intellij.openapi.ui.ComponentWithBrowseButton;
 import com.intellij.openapi.ui.LabeledComponent;
+import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.openapi.ui.panel.ComponentPanelBuilder;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -17,6 +26,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -27,23 +37,28 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
   private final @Nls String myName;
   private final @Nls String myGroup;
   protected C myComponent;
-  private final BiConsumer<Settings, C> myReset;
-  private final BiConsumer<Settings, C> myApply;
+  private final BiConsumer<? super Settings, ? super C> myReset;
+  private final BiConsumer<? super Settings, ? super C> myApply;
+  private @Nullable Function<Settings, List<ValidationInfo>> myValidation;
   private final int myCommandLinePosition;
-  private final Predicate<Settings> myInitialSelection;
+  private final Predicate<? super Settings> myInitialSelection;
   private @Nullable @Nls String myHint;
   private @Nullable JComponent myHintComponent;
-  private @Nullable Function<C, JComponent> myEditorGetter;
+  private @Nullable @Nls String myActionHint;
+  private @Nullable @Nls String myActionDescription;
+  private @Nullable String myConfigId; // for FUS
+  private @Nullable Function<? super C, ? extends JComponent> myEditorGetter;
   private boolean myRemovable = true;
+  private boolean myCanBeHidden;
 
   public SettingsEditorFragment(String id,
                                 @Nls(capitalization = Nls.Capitalization.Sentence) String name,
                                 @Nls(capitalization = Nls.Capitalization.Title) String group,
                                 C component,
                                 int commandLinePosition,
-                                BiConsumer<Settings, C> reset,
-                                BiConsumer<Settings, C> apply,
-                                Predicate<Settings> initialSelection) {
+                                BiConsumer<? super Settings, ? super C> reset,
+                                BiConsumer<? super Settings, ? super C> apply,
+                                Predicate<? super Settings> initialSelection) {
     myId = id;
     myName = name;
     myGroup = group;
@@ -58,12 +73,17 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
                                 @Nls(capitalization = Nls.Capitalization.Sentence) String name,
                                 @Nls(capitalization = Nls.Capitalization.Title) String group,
                                 C component,
-                                BiConsumer<Settings, C> reset, BiConsumer<Settings, C> apply,
-                                Predicate<Settings> initialSelection)  {
+                                BiConsumer<? super Settings, ? super C> reset,
+                                BiConsumer<? super Settings, ? super C> apply,
+                                Predicate<? super Settings> initialSelection) {
     this(id, name, group, component, 0, reset, apply, initialSelection);
   }
 
-  public static <S> SettingsEditorFragment<S, ?> createWrapper(String id, @Nls String name, @Nls String group, @NotNull SettingsEditor<S> inner) {
+  public static <S> SettingsEditorFragment<S, ?> createWrapper(String id,
+                                                               @Nls String name,
+                                                               @Nls String group,
+                                                               @NotNull SettingsEditor<S> inner,
+                                                               Predicate<? super S> initialSelection) {
     JComponent component = inner.getComponent();
     SettingsEditorFragment<S, JComponent> fragment = new SettingsEditorFragment<>(id, name, group, component,
                                                                                   (settings, c) -> inner.resetFrom(settings),
@@ -75,16 +95,20 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
                                                                                       throw new RuntimeException(e);
                                                                                     }
                                                                                   },
-                                                                                  s -> false);
+                                                                                  initialSelection);
     Disposer.register(fragment, inner);
     return fragment;
   }
 
-  public static <Settings> SettingsEditorFragment<Settings, ?> createTag(String id, @Nls String name, @Nls String group,
-                                                                         Predicate<Settings> getter, BiConsumer<Settings, Boolean> setter) {
+  public static <Settings> SettingsEditorFragment<Settings, TagButton> createTag(String id, @Nls String name, @Nls String group,
+                                                                         Predicate<? super Settings> getter,
+                                                                         BiConsumer<? super Settings, ? super Boolean> setter) {
     Ref<SettingsEditorFragment<Settings, ?>> ref = new Ref<>();
-    TagButton tagButton = new TagButton(name, () -> ref.get().setSelected(false));
-    SettingsEditorFragment<Settings, ?> fragment = new SettingsEditorFragment<Settings, JComponent>(id, name, group, tagButton,
+    TagButton tagButton = new TagButton(name, (e) -> {
+      ref.get().setSelected(false);
+      ref.get().logChange(false, e);
+    });
+    SettingsEditorFragment<Settings, TagButton> fragment = new SettingsEditorFragment<>(id, name, group, tagButton,
                                                                                                     (settings, button) -> button.setVisible(getter.test(settings)),
                                                                                                     (settings, button) -> setter.accept(settings, button.isVisible()),
                                                                                                     getter) {
@@ -117,6 +141,10 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
     return myComponent;
   }
 
+  public JComponent[] getAllComponents() {
+    return new JComponent[] { component() };
+  }
+
   public boolean isTag() { return false; }
 
   @Nullable
@@ -140,6 +168,46 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
     myRemovable = removable;
   }
 
+  public void setValidation(@Nullable Function<Settings, List<ValidationInfo>> validation) {
+    myValidation = validation;
+  }
+
+  protected void validate(Settings s) {
+    if (myValidation == null) return;
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+      List<ValidationInfo> infos = myValidation.apply(s);
+      if (infos.isEmpty()) return;
+      UIUtil.invokeLaterIfNeeded(() -> {
+        if (Disposer.isDisposed(this)) return;
+        for (ValidationInfo info : infos) {
+          JComponent component = info.component;
+          if (component == null) continue;
+          Optional<ComponentValidator> optional = ComponentValidator.getInstance(component);
+          ComponentValidator validator;
+          if (optional.isEmpty()) {
+            validator = new ComponentValidator(this);
+            validator.installOn(component);
+          }
+          else {
+            validator = optional.get();
+          }
+          validator.updateInfo(info.message.isEmpty() ? null : info);
+        }
+      });
+    });
+  }
+
+  /**
+   * Can be hidden by user even if {@link #isInitiallyVisible(Object)} returns true
+   */
+  public boolean isCanBeHidden() {
+    return myCanBeHidden;
+  }
+
+  public void setCanBeHidden(boolean canBeHidden) {
+    myCanBeHidden = canBeHidden;
+  }
+
   public void setSelected(boolean selected) {
     myComponent.setVisible(selected);
     if (myHintComponent != null) {
@@ -148,28 +216,41 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
     fireEditorStateChanged();
   }
 
-  public void toggle(boolean selected) {
+  public void toggle(boolean selected, @Nullable AnActionEvent e) {
     setSelected(selected);
     if (selected) {
-      IdeFocusManager.getGlobalInstance().requestFocus(getEditorComponent(), false);
+      myComponent.scrollRectToVisible(new Rectangle(new Point(0, 50), myComponent.getPreferredSize()));
+    }
+    logChange(selected, e);
+  }
+
+  protected void logChange(boolean selected, @Nullable AnActionEvent e) {
+    if (selected) {
+      FragmentStatisticsService.getInstance().logOptionModified(getProject(), getId(), myConfigId, e);
+    }
+    else {
+      FragmentStatisticsService.getInstance().logOptionRemoved(getProject(), getId(), myConfigId, e);
     }
   }
 
-  public void setEditorGetter(@Nullable Function<C, JComponent> editorGetter) {
+  private Project getProject() {
+    return DataManager.getInstance().getDataContext(myComponent).getData(PlatformDataKeys.PROJECT_CONTEXT);
+  }
+
+  public void setEditorGetter(@Nullable Function<? super C, ? extends JComponent> editorGetter) {
     myEditorGetter = editorGetter;
   }
 
-  @NotNull
-  protected JComponent getEditorComponent() {
+  public JComponent getEditorComponent() {
     JComponent component = component();
     if (myEditorGetter != null) return myEditorGetter.apply(component());
     if (component instanceof LabeledComponent) {
-      return ((LabeledComponent<?>)component).getComponent();
+      component = ((LabeledComponent<?>)component).getComponent();
     }
     else if (component instanceof  TagButton) {
       return ((TagButton)component).myButton;
     }
-    return component;
+    return component instanceof ComponentWithBrowseButton ? ((ComponentWithBrowseButton<?>)component).getChildComponent() : component;
   }
 
   public int getCommandLinePosition() {
@@ -184,8 +265,9 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
   }
 
   @Override
-  protected void applyEditorTo(@NotNull Settings s) throws ConfigurationException {
+  protected void applyEditorTo(@NotNull Settings s) {
     myApply.accept(s, myComponent);
+    validate(s);
   }
 
   @Override
@@ -202,12 +284,32 @@ public class SettingsEditorFragment<Settings, C extends JComponent> extends Sett
     return null;
   }
 
-  public @Nullable String getHint() {
+  public @Nullable @NlsActions.ActionDescription String getActionHint() {
+    return myActionHint;
+  }
+
+  public void setActionDescription(@Nullable @Nls String actionDescription) {
+    myActionDescription = actionDescription;
+  }
+
+  public @Nullable @Nls String getActionDescription() {
+    return myActionDescription;
+  }
+
+  public void setActionHint(@Nullable @Nls String hint) {
+    myActionHint = hint;
+  }
+
+  public @Nullable String getHint(@Nullable JComponent component) {
     return myHint;
   }
 
   public void setHint(@Nullable @Nls String hint) {
     myHint = hint;
+  }
+
+  public void setConfigId(@Nullable String configId) {
+    myConfigId = configId;
   }
 
   public @Nullable JComponent getHintComponent() {

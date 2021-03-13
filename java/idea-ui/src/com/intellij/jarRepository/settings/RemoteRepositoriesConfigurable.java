@@ -78,11 +78,11 @@ public class RemoteRepositoriesConfigurable implements SearchableConfigurable, C
   private void configControls() {
     myMavenPanel.setBorder(IdeBorderFactory.createTitledBorder(JavaUiBundle.message("settings.remote.repo.maven.jar.repositories"), false, JBUI.insetsTop(8)).setShowLine(false));
     myServiceListPanel.setBorder(IdeBorderFactory.createTitledBorder(JavaUiBundle.message(
-      "settings.remote.repo.artifactory.nexus.or.bintray.service.urls"), false, JBUI.insetsTop(8)).setShowLine(false));
+      "settings.remote.repo.artifactory.or.nexus.service.urls"), false, JBUI.insetsTop(8)).setShowLine(false));
 
     setupListControls(
       myServiceList, myServicesModel, myAddServiceButton, myEditServiceButton, myRemoveServiceButton,
-      JavaUiBundle.message("settings.remote.repo.artifactory.nexus.or.bintray"), JavaUiBundle.message("settings.remote.repo.service.url"),
+      JavaUiBundle.message("settings.remote.repo.artifactory.or.nexus"), JavaUiBundle.message("settings.remote.repo.service.url"),
       JavaUiBundle.message("settings.remote.repo.no.services"), DataAdapter.STRING_ADAPTER
     );
     setupListControls(
@@ -129,9 +129,9 @@ public class RemoteRepositoriesConfigurable implements SearchableConfigurable, C
   }
 
   private interface DataAdapter<Data, Presentation> {
-    DataAdapter<String, String> STRING_ADAPTER = new DataAdapter<String, String>() {
+    DataAdapter<String, String> STRING_ADAPTER = new DataAdapter<>() {
       @Override
-      public @Nls String toPresentation(@Nls String s) {
+      public String toPresentation(@Nls String s) {
         return s;
       }
 
@@ -146,9 +146,9 @@ public class RemoteRepositoriesConfigurable implements SearchableConfigurable, C
       }
     };
 
-    DataAdapter<RemoteRepositoryDescription, String> REPOSITORY_DESCRIPTION_ADAPTER = new DataAdapter<RemoteRepositoryDescription, String>() {
+    DataAdapter<RemoteRepositoryDescription, String> REPOSITORY_DESCRIPTION_ADAPTER = new DataAdapter<>() {
       @Override
-      public @Nls String toPresentation(RemoteRepositoryDescription description) {
+      public String toPresentation(RemoteRepositoryDescription description) {
         return description.getUrl();
       }
 

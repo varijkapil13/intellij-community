@@ -70,6 +70,7 @@ public class RepositoryLibraryDescription {
       }
       ourStaticallyDefinedLibraries = Collections.unmodifiableMap(Collections.synchronizedMap(map));
     }
+    @NlsSafe
     final String id = groupId == null && artifactId == null ? CodeInsightBundle.message("unknown.node.text") : groupId + ":" + artifactId;
     final RepositoryLibraryDescription description = ourStaticallyDefinedLibraries.get(id);
     return description != null? description : new RepositoryLibraryDescription(groupId, artifactId, id);
@@ -120,7 +121,7 @@ public class RepositoryLibraryDescription {
     return new RepositoryLibraryProperties(getGroupId(), getArtifactId(), ReleaseVersionId, true, ContainerUtil.emptyList());
   }
 
-  public String getDisplayName(String version) {
+  public @NlsSafe String getDisplayName(String version) {
     if (LatestVersionId.equals(version)) {
       version = LatestVersionDisplayName;
     }

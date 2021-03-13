@@ -35,7 +35,15 @@ public interface RangeHighlighterEx extends RangeHighlighter, RangeMarkerEx {
     return null;
   }
 
-  void setTextAttributes(@NotNull TextAttributes textAttributes);
+  /**
+   * Sets text attributes used for highlighting.
+   * Manually set attributes have priority over {@link #getTextAttributesKey()}
+   * during the calculation of {@link #getTextAttributes(EditorColorsScheme)}
+   *
+   * Can be also used to temporary hide the highlighter
+   * {@link com.intellij.openapi.editor.markup.TextAttributes#ERASE_MARKER }
+   */
+  void setTextAttributes(@Nullable TextAttributes textAttributes);
 
   /**
    * @see #isVisibleIfFolded()
@@ -69,6 +77,7 @@ public interface RangeHighlighterEx extends RangeHighlighter, RangeMarkerEx {
    * it's impossible to tell if a highlighter should be rendered in a scroll bar since an editor can have a custom color scheme
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   default boolean isRenderedInScrollBar() {
     return getErrorStripeMarkColor(null) != null;
   }

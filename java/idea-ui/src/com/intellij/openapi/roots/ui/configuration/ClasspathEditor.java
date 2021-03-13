@@ -18,6 +18,7 @@ package com.intellij.openapi.roots.ui.configuration;
 import com.intellij.ProjectTopics;
 import com.intellij.ide.JavaUiBundle;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.compiler.JavaCompilerBundle;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -31,9 +32,12 @@ import com.intellij.openapi.roots.impl.storage.ClasspathStorageProvider;
 import com.intellij.openapi.roots.ui.configuration.classpath.ClasspathPanelImpl;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.ui.JBUI;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,10 +51,12 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
    * @deprecated Use {@link #getName()} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public static final String NAME = "Dependencies";
 
   private ClasspathPanelImpl myPanel;
   private ClasspathFormatPanel myClasspathFormatPanel;
+  private boolean myDisposed;
 
   public ClasspathEditor(final ModuleConfigurationState state) {
     super(state);
@@ -103,7 +109,7 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
     panel.add(myPanel, BorderLayout.CENTER);
 
     final ModuleJdkConfigurable jdkConfigurable =
-      new ModuleJdkConfigurable(this, ProjectStructureConfigurable.getInstance(myProject).getProjectJdksModel()) {
+      new ModuleJdkConfigurable(this, ((ModulesConfigurator)getState().getModulesProvider()).getProjectStructureConfigurable()) {
         @Override
         protected ModifiableRootModel getRootModel() {
           return getModifiableModel();
@@ -123,7 +129,7 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
   }
 
   private ModifiableRootModel getModifiableModel() {
-    return getState().getRootModel();
+    return getState().getModifiableRootModel();
   }
 
   public void selectOrderEntry(@NotNull final OrderEntry entry) {
@@ -140,8 +146,18 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
   @Override
   public void rootsChanged(@NotNull ModuleRootEvent event) {
     if (myPanel != null) {
-      myPanel.rootsChanged();
+      ApplicationManager.getApplication().invokeLater(() -> {
+        if (!myDisposed) {
+          myPanel.rootsChanged();
+        }
+      });
     }
+  }
+
+  @Override
+  public void disposeUIResources() {
+    super.disposeUIResources();
+    myDisposed = true;
   }
 
   public void setSdk(@Nullable final Sdk newJDK) {
@@ -187,8 +203,9 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
       return (String)comboBoxClasspathFormat.getSelectedItem();
     }
 
-    private String getModuleClasspathFormat() {
-      return ClassPathStorageUtil.getStorageType(myState.getRootModel().getModule());
+    private @NlsContexts.Label String getModuleClasspathFormat() {
+      @NlsSafe final String type = ClassPathStorageUtil.getStorageType(myState.getCurrentRootModel().getModule());
+      return type;
     }
 
     private boolean isModified() {
@@ -198,17 +215,17 @@ public class ClasspathEditor extends ModuleElementsEditor implements ModuleRootL
     public void canApply() throws ConfigurationException {
       ClasspathStorageProvider provider = ClasspathStorage.getProvider(getSelectedClasspathFormat());
       if (provider != null) {
-        provider.assertCompatible(myState.getRootModel());
+        provider.assertCompatible(myState.getCurrentRootModel());
       }
     }
 
     private void apply() throws ConfigurationException {
       canApply();
-      ClasspathStorage.setStorageType(myState.getRootModel(), getSelectedClasspathFormat());
+      ClasspathStorage.setStorageType(myState.getCurrentRootModel(), getSelectedClasspathFormat());
     }
   }
 
-  public static String getName() {
+  public static @NlsContexts.ConfigurableName String getName() {
     return JavaCompilerBundle.message("modules.classpath.title");
   }
 }

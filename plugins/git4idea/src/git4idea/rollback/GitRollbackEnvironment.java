@@ -19,6 +19,7 @@ import git4idea.commands.Git;
 import git4idea.commands.GitCommand;
 import git4idea.commands.GitLineHandler;
 import git4idea.i18n.GitBundle;
+import git4idea.index.vfs.GitIndexFileSystemRefresher;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitUntrackedFilesHolder;
 import git4idea.util.GitFileUtils;
@@ -121,12 +122,12 @@ public final class GitRollbackEnvironment implements RollbackEnvironment {
         File ioFile = file.getIOFile();
         if (ioFile.exists()) {
           if (!ioFile.delete()) {
-            exceptions.add(new VcsException("Unable to delete file: " + file));
+            exceptions.add(new VcsException(GitBundle.message("error.cannot.delete.file", file.getPresentableUrl())));
           }
         }
       }
       catch (Exception e) {
-        exceptions.add(new VcsException("Unable to delete file: " + file, e));
+        exceptions.add(new VcsException(GitBundle.message("error.cannot.delete.file", file.getPresentableUrl()), e));
       }
     }
     // revert files from HEAD
@@ -154,6 +155,7 @@ public final class GitRollbackEnvironment implements RollbackEnvironment {
       }
     }
     lfs.refreshIoFiles(filesToRefresh);
+    GitIndexFileSystemRefresher.refreshFilePaths(myProject, toUnindex);
 
     for (GitRepository repo : GitUtil.getRepositoryManager(myProject).getRepositories()) {
       repo.update();
@@ -218,12 +220,5 @@ public final class GitRollbackEnvironment implements RollbackEnvironment {
     catch (VcsException e) {
       exceptions.add(e);
     }
-  }
-
-  public static void resetHardLocal(@NotNull Project project, @NotNull VirtualFile root) {
-    GitLineHandler handler = new GitLineHandler(project, root, GitCommand.RESET);
-    handler.addParameters("--hard");
-    handler.endOptions();
-    Git.getInstance().runCommand(handler);
   }
 }

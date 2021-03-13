@@ -1,8 +1,9 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.indices;
 
 import com.intellij.jarRepository.services.bintray.BintrayModel;
 import com.intellij.jarRepository.services.bintray.BintrayRepositoryService;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
@@ -176,9 +177,12 @@ public class MavenIndex implements MavenSearchIndex {
       try {
         doOpen();
       }
-      catch (Exception e1) {
-        final boolean versionUpdated = e1.getCause() instanceof PersistentEnumeratorBase.VersionUpdatedException;
-        if (!versionUpdated) MavenLog.LOG.warn(e1);
+      catch (Exception e) {
+        if (e instanceof ProcessCanceledException) {
+          throw (ProcessCanceledException)e;
+        }
+        final boolean versionUpdated = e.getCause() instanceof PersistentEnumeratorBase.VersionUpdatedException;
+        if (!versionUpdated) MavenLog.LOG.warn(e);
 
         try {
           doOpen();
@@ -556,7 +560,7 @@ public class MavenIndex implements MavenSearchIndex {
   @TestOnly
   public synchronized void printInfo() {
     doIndexTask(() -> {
-      MavenLog.LOG.debug("BaseFile: " + myData.groupToArtifactMap.getBaseFile());
+      MavenLog.LOG.debug("BaseFile: " + myData.groupToArtifactMap);
       MavenLog.LOG.debug("All data objects: " + getGroupIdsRaw());
       return null;
     }, null);

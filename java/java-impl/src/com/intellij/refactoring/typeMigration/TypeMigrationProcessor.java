@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.typeMigration;
 
 import com.intellij.java.JavaBundle;
@@ -27,7 +27,7 @@ import com.intellij.util.Functions;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import gnu.trove.THashSet;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -37,14 +37,14 @@ public class TypeMigrationProcessor extends BaseRefactoringProcessor {
   private final static int MAX_ROOT_IN_PREVIEW_PRESENTATION = 3;
 
   private PsiElement[] myRoots;
-  private final Function<PsiElement, PsiType> myRootTypes;
+  private final Function<? super PsiElement, ? extends PsiType> myRootTypes;
   private final boolean myAllowDependentRoots;
   private final TypeMigrationRules myRules;
   private TypeMigrationLabeler myLabeler;
 
   public TypeMigrationProcessor(final Project project,
                                 final PsiElement[] roots,
-                                final Function<PsiElement, PsiType> rootTypes,
+                                final Function<? super PsiElement, ? extends PsiType> rootTypes,
                                 final TypeMigrationRules rules,
                                 final boolean allowDependentRoots) {
     super(project);
@@ -77,7 +77,7 @@ public class TypeMigrationProcessor extends BaseRefactoringProcessor {
                                                   final Editor editor,
                                                   final TypeMigrationRules rules,
                                                   final PsiElement[] roots,
-                                                  final Function<PsiElement, PsiType> migrationTypeFunction,
+                                                  final Function<? super PsiElement, ? extends PsiType> migrationTypeFunction,
                                                   final boolean optimizeImports,
                                                   boolean allowDependentRoots) {
     final Set<PsiFile> containingFiles = ContainerUtil.map2Set(roots, PsiElement::getContainingFile);
@@ -106,7 +106,7 @@ public class TypeMigrationProcessor extends BaseRefactoringProcessor {
         }
         if (optimizeImports) {
           final JavaCodeStyleManager javaCodeStyleManager = JavaCodeStyleManager.getInstance(myProject);
-          final Set<PsiFile> affectedFiles = new THashSet<>();
+          final Set<PsiFile> affectedFiles = new HashSet<>();
           for (UsageInfo usage : usages) {
             final PsiFile usageFile = usage.getFile();
             if (usageFile != null) {
@@ -181,7 +181,7 @@ public class TypeMigrationProcessor extends BaseRefactoringProcessor {
         name += "...";
       }
     }
-    Content content = UsageViewContentManager.getInstance(myProject).addContent(name, false, panel, true, true);
+    Content content = UsageViewContentManager.getInstance(myProject).addContent(XmlStringUtil.wrapInHtml(name), false, panel, true, true);
     panel.setContent(content);
     ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.FIND).activate(null);
   }
@@ -269,6 +269,6 @@ public class TypeMigrationProcessor extends BaseRefactoringProcessor {
   @NotNull
   @Override
   protected String getCommandName() {
-    return "TypeMigration";
+    return JavaBundle.message("type.migration.command.name");
   }
 }

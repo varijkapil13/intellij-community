@@ -9,13 +9,14 @@ import com.intellij.openapi.keymap.KeymapGroup;
 import com.intellij.openapi.keymap.impl.ui.Group;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.NlsActions;
 
 import java.util.List;
 
 public abstract class BaseToolKeymapExtension implements KeymapExtension {
 
   @Override
-  public KeymapGroup createGroup(final Condition<AnAction> filtered, final Project project) {
+  public KeymapGroup createGroup(final Condition<? super AnAction> filtered, final Project project) {
     final ActionManagerEx actionManager = ActionManagerEx.getInstanceEx();
     Group rootGroup = new Group(getRootGroupName(), getRootGroupId(), AllIcons.Nodes.KeymapTools);
     List<ToolsGroup<Tool>> groups = ToolManager.getInstance().getGroups();
@@ -41,7 +42,7 @@ public abstract class BaseToolKeymapExtension implements KeymapExtension {
 
   protected abstract List<? extends Tool> getToolsIdsByGroupName(String groupName);
 
-  protected abstract String getRootGroupName();
+  protected abstract @NlsActions.ActionText String getRootGroupName();
 
   protected abstract String getRootGroupId();
 }

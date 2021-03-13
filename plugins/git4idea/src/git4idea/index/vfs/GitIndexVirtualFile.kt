@@ -27,7 +27,9 @@ import git4idea.commands.GitLineHandler
 import git4idea.i18n.GitBundle
 import git4idea.index.GitIndexUtil
 import git4idea.util.GitFileUtils
+import org.jetbrains.annotations.NonNls
 import java.io.*
+import java.util.*
 import java.util.concurrent.atomic.AtomicReference
 
 class GitIndexVirtualFile(private val project: Project,
@@ -56,7 +58,7 @@ class GitIndexVirtualFile(private val project: Project,
   override fun getChildren(): Array<VirtualFile> = EMPTY_ARRAY
   override fun isWritable(): Boolean = true
   override fun isDirectory(): Boolean = false
-  override fun isValid(): Boolean = cachedData.get() != null
+  override fun isValid(): Boolean = cachedData.get() != null && !project.isDisposed
   override fun getName(): String = filePath.name
   override fun getPresentableName(): String = GitBundle.message("stage.vfs.presentable.file.name", filePath.name)
   override fun getPath(): String = encode(project, root, filePath)
@@ -169,6 +171,7 @@ class GitIndexVirtualFile(private val project: Project,
 
     other as GitIndexVirtualFile
 
+    if (project != other.project) return false
     if (root != other.root) return false
     if (filePath != other.filePath) return false
 
@@ -176,12 +179,10 @@ class GitIndexVirtualFile(private val project: Project,
   }
 
   override fun hashCode(): Int {
-    var result = root.hashCode()
-    result = 31 * result + filePath.hashCode()
-    return result
+    return Objects.hash(project, root, filePath)
   }
 
-  override fun toString(): String {
+  override fun toString(): @NonNls String {
     return "GitIndexVirtualFile: [${root.name}]/${VcsFileUtil.relativePath(root, filePath)}"
   }
 
@@ -197,7 +198,7 @@ class GitIndexVirtualFile(private val project: Project,
       return cachedData.compareAndSet(oldCachedData, newCachedData)
     }
 
-    override fun toString(): String {
+    override fun toString(): @NonNls String {
       return "GitIndexVirtualFile.Refresh: ${this@GitIndexVirtualFile}"
     }
   }

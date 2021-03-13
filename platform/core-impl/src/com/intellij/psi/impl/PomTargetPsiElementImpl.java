@@ -1,11 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl;
 
 import com.intellij.ide.IconProvider;
 import com.intellij.ide.TypePresentationService;
 import com.intellij.lang.Language;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.*;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
@@ -69,7 +68,7 @@ public class PomTargetPsiElementImpl extends RenameableFakePsiElement implements
 
   @Override
   public Icon getIcon() {
-    for (IconProvider iconProvider : IconProvider.EXTENSION_POINT_NAME.getExtensions()) {
+    for (IconProvider iconProvider : IconProvider.EXTENSION_POINT_NAME.getExtensionList()) {
       if (iconProvider instanceof PomIconProvider) {
         final Icon icon = ((PomIconProvider)iconProvider).getIcon(myTarget, 0);
         if (icon != null) {
@@ -183,13 +182,5 @@ public class PomTargetPsiElementImpl extends RenameableFakePsiElement implements
       }
     }
     return super.getLocationString();
-  }
-
-  @Override
-  public @Nullable TextRange getTextRange() {
-    if (myTarget instanceof PsiTarget) {
-      return ((PsiTarget)myTarget).getNavigationElement().getTextRange();
-    }
-    return super.getTextRange();
   }
 }

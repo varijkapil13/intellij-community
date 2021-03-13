@@ -4,6 +4,7 @@ package com.intellij.execution.runners;
 import com.intellij.CommonBundle;
 import com.intellij.execution.ExecutionResult;
 import com.intellij.execution.Executor;
+import com.intellij.execution.actions.CreateAction;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.ui.*;
@@ -137,9 +138,8 @@ public final class RunContentBuilder extends RunTab {
     actionGroup.add(ActionManager.getInstance().getAction(IdeActions.ACTION_RERUN));
     final AnAction[] actions = contentDescriptor.getRestartActions();
     actionGroup.addAll(actions);
-    if (actions.length > 0) {
-      actionGroup.addSeparator();
-    }
+    actionGroup.add(new CreateAction());
+    actionGroup.addSeparator();
 
     actionGroup.add(ActionManager.getInstance().getAction(IdeActions.ACTION_STOP_PROGRAM));
     actionGroup.addAll(myExecutionResult.getActions());
@@ -198,7 +198,7 @@ public final class RunContentBuilder extends RunTab {
     }
 
     @Override
-    public void contentAdded(@NotNull Collection<ConsoleViewContentType> types) {
+    public void contentAdded(@NotNull Collection<? extends ConsoleViewContentType> types) {
       if (myProject.isDisposed() || myUi.isDisposed())
         return;
       for (ConsoleViewContentType type : types) {

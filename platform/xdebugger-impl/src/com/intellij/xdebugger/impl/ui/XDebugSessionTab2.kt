@@ -149,8 +149,9 @@ class XDebugSessionTab2(
   override fun addVariablesAndWatches(session: XDebugSessionImpl) {
     val variablesView: XVariablesView?
     val watchesView: XVariablesView?
+    val layoutDisposable = Disposer.newDisposable(ui.contentManager, "debugger layout disposable")
     if (isWatchesInVariables) {
-      variablesView = XWatchesViewImpl(session, true)
+      variablesView = XWatchesViewImpl2(session, true, true, layoutDisposable)
       registerView(DebuggerContentInfo.VARIABLES_CONTENT, variablesView)
       variables = variablesView
 
@@ -161,7 +162,7 @@ class XDebugSessionTab2(
       registerView(DebuggerContentInfo.VARIABLES_CONTENT, variablesView)
       variables = variablesView
       
-      watchesView = XWatchesViewImpl(session, false, true)
+      watchesView = XWatchesViewImpl2(session, false, true, layoutDisposable)
       registerView(DebuggerContentInfo.WATCHES_CONTENT, watchesView)
       myWatchesView = watchesView
     }
@@ -248,14 +249,9 @@ class XDebugSessionTab2(
       val topMiddleToolbar = DefaultActionGroup().apply {
         if (singleContent == null || headerVisible) return@apply
 
-        add(object : AnAction() {
+        add(object : AnAction(XDebuggerBundle.message("session.tab.close.debug.session"), null, AllIcons.Actions.Close) {
           override fun actionPerformed(e: AnActionEvent) {
             toolWindow.contentManager.removeContent(singleContent, true)
-          }
-
-          override fun update(e: AnActionEvent) {
-            e.presentation.text = "Close debug session"
-            e.presentation.icon = AllIcons.Actions.Close
           }
         })
         addSeparator()
@@ -295,10 +291,10 @@ class XDebugSessionTab2(
         override fun update(e: AnActionEvent) {
           e.presentation.icon = AllIcons.Actions.SplitVertically
           if (threadsIsVisible) {
-            e.presentation.text = "Hide threads view"
+            e.presentation.text = XDebuggerBundle.message("session.tab.hide.threads.view")
           }
           else {
-            e.presentation.text = "Show threads view"
+            e.presentation.text = XDebuggerBundle.message("session.tab.show.threads.view")
           }
 
           setSelected(e, threadsIsVisible)

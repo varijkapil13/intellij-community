@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.xdebugger.impl;
 
 import com.intellij.AppTopics;
@@ -19,7 +19,11 @@ import com.intellij.ide.plugins.DynamicPluginListener;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.NotificationGroupManager;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
@@ -61,6 +65,7 @@ import com.intellij.xdebugger.impl.ui.ExecutionPointHighlighter;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.ui.DebuggerColors;
 import one.util.streamex.StreamEx;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -75,8 +80,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @State(name = "XDebuggerManager", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
 public final class XDebuggerManagerImpl extends XDebuggerManager implements PersistentStateComponent<XDebuggerState>, Disposable {
-  public static final NotificationGroup NOTIFICATION_GROUP =
-    NotificationGroup.toolWindowGroup("Debugger messages", ToolWindowId.DEBUG, false);
+  /**
+   * @deprecated Use {@link #getNotificationGroup()}
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval
+  public static final NotificationGroup NOTIFICATION_GROUP = getNotificationGroup();
 
   private final Project myProject;
   private final XBreakpointManagerImpl myBreakpointManager;
@@ -94,7 +103,7 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
     MessageBusConnection messageBusConnection = project.getMessageBus().connect(this);
 
     myBreakpointManager = new XBreakpointManagerImpl(project, this, messageBusConnection);
-    myWatchesManager = new XDebuggerWatchesManager();
+    myWatchesManager = new XDebuggerWatchesManager(project);
     myPinToTopManager = new XDebuggerPinToTopManager();
     myExecutionPointHighlighter = new ExecutionPointHighlighter(project);
 
@@ -115,13 +124,13 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
         updateExecutionPoint(file, false);
       }
     });
-    messageBusConnection.subscribe(XBreakpointListener.TOPIC, new XBreakpointListener<XBreakpoint<?>>() {
+    messageBusConnection.subscribe(XBreakpointListener.TOPIC, new XBreakpointListener<>() {
       @Override
       public void breakpointChanged(@NotNull XBreakpoint<?> breakpoint) {
         if (!(breakpoint instanceof XLineBreakpoint)) {
           final XDebugSessionImpl session = getCurrentSession();
           if (session != null && breakpoint.equals(session.getActiveNonLineBreakpoint())) {
-            final XBreakpointBase breakpointBase = (XBreakpointBase)breakpoint;
+            XBreakpointBase breakpointBase = (XBreakpointBase)breakpoint;
             breakpointBase.clearIcon();
             myExecutionPointHighlighter.updateGutterIcon(breakpointBase.createGutterIconRenderer());
           }
@@ -395,7 +404,11 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
 
   private static final TooltipGroup RUN_TO_CURSOR_TOOLTIP_GROUP = new TooltipGroup("RUN_TO_CURSOR_TOOLTIP_GROUP", 0);
 
-  private class DebuggerEditorListener implements EditorMouseMotionListener, EditorMouseListener {
+  public static @NotNull NotificationGroup getNotificationGroup() {
+    return NotificationGroupManager.getInstance().getNotificationGroup("Debugger messages");
+  }
+
+  private final class DebuggerEditorListener implements EditorMouseMotionListener, EditorMouseListener {
     RangeHighlighter myCurrentHighlighter;
 
     boolean isEnabled(@NotNull EditorMouseEvent e) {
@@ -468,7 +481,10 @@ public final class XDebuggerManagerImpl extends XDebuggerManager implements Pers
         if (session != null && lineNumber >= 0) {
           XSourcePositionImpl position = XSourcePositionImpl.create(((EditorEx)e.getEditor()).getVirtualFile(), lineNumber);
           if (position != null) {
+            ActionManagerEx am = ActionManagerEx.getInstanceEx();
+            am.fireBeforeActionPerformed(IdeActions.ACTION_RUN_TO_CURSOR, e.getMouseEvent(), ActionPlaces.EDITOR_GUTTER);
             session.runToPosition(position, false);
+            am.fireAfterActionPerformed(IdeActions.ACTION_RUN_TO_CURSOR, e.getMouseEvent(), ActionPlaces.EDITOR_GUTTER);
             e.consume();
           }
         }

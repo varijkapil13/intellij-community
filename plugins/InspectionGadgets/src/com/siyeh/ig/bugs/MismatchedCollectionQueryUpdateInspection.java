@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2011 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2021 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,6 @@ import java.awt.*;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static com.siyeh.ig.psiutils.ClassUtils.isImmutable;
 
@@ -77,7 +76,7 @@ public class MismatchedCollectionQueryUpdateInspection
   @SuppressWarnings("PublicField")
   public final ExternalizableStringSet queryNames =
     new ExternalizableStringSet(
-      "contains", "copyInto", "equals", "forEach", "get", "hashCode", "iterator", "parallelStream", "propertyNames",
+      "contains", "copyInto", "equals", "forEach", "get", "hashCode", "iterator", "parallelStream", "peek", "propertyNames",
       "save", "size", "store", "stream", "toArray", "toString", "write");
   @SuppressWarnings("PublicField")
   public final ExternalizableStringSet updateNames =
@@ -189,8 +188,10 @@ public class MismatchedCollectionQueryUpdateInspection
           return;
         }
         PsiElement parent = reference.getParent();
-        if (parent instanceof PsiExpressionList) {
-          PsiExpressionList args = (PsiExpressionList)parent;
+        PsiElement grandParent = skipAssigmentExprUp(parent);
+        if (parent instanceof PsiExpressionList ||
+            (parent instanceof PsiAssignmentExpression && grandParent instanceof PsiExpressionList)) {
+          PsiExpressionList args = (PsiExpressionList)(parent instanceof PsiExpressionList ? parent : grandParent);
           PsiCallExpression surroundingCall = ObjectUtils.tryCast(args.getParent(), PsiCallExpression.class);
           if (surroundingCall != null) {
             if (surroundingCall instanceof PsiMethodCallExpression &&
@@ -258,7 +259,7 @@ public class MismatchedCollectionQueryUpdateInspection
         if (method != null &&
             (!PsiType.VOID.equals(method.getReturnType()) &&
              !PsiType.VOID.equals(LambdaUtil.getFunctionalInterfaceReturnType(expression)) ||
-             Stream.of(method.getParameterList().getParameters()).anyMatch(p -> LambdaUtil.isFunctionalType(p.getType())))) {
+             ContainerUtil.or(method.getParameterList().getParameters(), p -> LambdaUtil.isFunctionalType(p.getType())))) {
           makeQueried();
         }
       }
@@ -307,6 +308,19 @@ public class MismatchedCollectionQueryUpdateInspection
                   break;
                 }
               }
+            }
+            if (call.getArgumentList().getExpressionCount() == 2 &&
+                ("poll".equals(name) || "pollFirst".equals(name) || "pollLast".equals(name)) &&
+                TypeUtils.variableHasTypeOrSubtype(variable, "java.util.concurrent.BlockingQueue")) {
+              // poll(timeout, unit) on a blocking queue/dequeue may be considered querying, even if the result is not used,
+              // because the thread will be blocked until a value is received (or a timeout happens).
+              makeQueried();
+            }
+            else if (("take".equals(name) || "takeFirst".equals(name) || "takeLast".equals(name)) &&
+                     TypeUtils.variableHasTypeOrSubtype(variable, "java.util.concurrent.BlockingQueue")) {
+              // take() on a blocking queue/dequeue may be considered querying, even if the result is not used.
+              // because the thread will be blocked until a value is received.
+              makeQueried();
             }
           }
         }
@@ -449,6 +463,14 @@ public class MismatchedCollectionQueryUpdateInspection
     return immutable && !SideEffectChecker.mayHaveSideEffects(call);
   }
 
+  private static PsiElement skipAssigmentExprUp(@Nullable PsiElement parent) {
+    parent = PsiUtil.skipParenthesizedExprUp(parent);
+    while (parent instanceof PsiAssignmentExpression) {
+      parent = PsiUtil.skipParenthesizedExprUp(parent.getParent());
+    }
+    return parent;
+  }
+
   static class QueryUpdateInfo {
     boolean updated;
     boolean queried;
@@ -518,7 +540,7 @@ public class MismatchedCollectionQueryUpdateInspection
       if (!CollectionUtils.isCollectionClassOrInterface(type)) {
         return false;
       }
-      return ignoredClasses.stream().noneMatch(className -> InheritanceUtil.isInheritor(type, className));
+      return !ContainerUtil.exists(ignoredClasses, className -> InheritanceUtil.isInheritor(type, className));
     }
 
     private boolean updatedViaInitializer(PsiVariable variable) {

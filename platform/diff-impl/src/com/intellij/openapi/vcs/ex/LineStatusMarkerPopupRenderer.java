@@ -1,6 +1,8 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.ex;
 
+import com.intellij.codeInsight.hint.HintManager;
+import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.diff.DiffApplicationSettings;
 import com.intellij.diff.DiffContentFactory;
 import com.intellij.diff.DiffManager;
@@ -33,6 +35,7 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.EditorTextField;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -50,6 +53,7 @@ public abstract class LineStatusMarkerPopupRenderer extends LineStatusMarkerRend
    * @deprecated Use {@link LineStatusMarkerPopupRenderer#LineStatusMarkerPopupRenderer(LineStatusTrackerI)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public LineStatusMarkerPopupRenderer(@NotNull LineStatusTrackerBase<?> tracker) {
     this((LineStatusTrackerI<?>)tracker);
   }
@@ -95,19 +99,22 @@ public abstract class LineStatusMarkerPopupRenderer extends LineStatusMarkerRend
 
   public void scrollAndShow(@NotNull Editor editor, @NotNull Range range) {
     if (!myTracker.isValid()) return;
-    final Document document = myTracker.getDocument();
-    int line = Math.min(!range.hasLines() ? range.getLine2() : range.getLine2() - 1, getLineCount(document) - 1);
-    final int lastOffset = document.getLineStartOffset(line);
+    moveToRange(editor, range);
+    showAfterScroll(editor, range);
+  }
+
+  public static void moveToRange(@NotNull Editor editor, @NotNull Range range) {
+    final Document document = editor.getDocument();
+    int targetLine = !range.hasLines() ? range.getLine2() : range.getLine2() - 1;
+    int line = Math.min(targetLine, getLineCount(document) - 1);
+    int lastOffset = document.getLineStartOffset(line);
     editor.getCaretModel().moveToOffset(lastOffset);
     editor.getScrollingModel().scrollToCaret(ScrollType.CENTER);
-
-    showAfterScroll(editor, range);
   }
 
   public void showAfterScroll(@NotNull Editor editor, @NotNull Range range) {
     editor.getScrollingModel().runActionOnScrollingFinished(() -> {
-      Range newRange = myTracker.findRange(range);
-      if (newRange != null) showHintAt(editor, newRange, null);
+      reopenRange(editor, range, null);
     });
   }
 
@@ -141,7 +148,16 @@ public abstract class LineStatusMarkerPopupRenderer extends LineStatusMarkerRend
 
     JComponent additionalInfoPanel = createAdditionalInfoPanel(editor, range, mousePosition, disposable);
 
-    LineStatusMarkerPopupPanel.showPopupAt(editor, toolbar, editorComponent, additionalInfoPanel, mousePosition, disposable);
+    LineStatusMarkerPopupPanel.showPopupAt(editor, toolbar, editorComponent, additionalInfoPanel, mousePosition, disposable, null);
+  }
+
+  protected void reopenRange(@NotNull Editor editor, @NotNull Range range, @Nullable Point mousePosition) {
+    Range newRange = myTracker.findRange(range);
+    if (newRange != null) {
+      showHintAt(editor, newRange, mousePosition);
+    } else {
+      HintManagerImpl.getInstanceImpl().hideHints(HintManager.HIDE_BY_SCROLLING, false, false);
+    }
   }
 
   private void installWordDiff(@NotNull Editor editor,
@@ -338,10 +354,7 @@ public abstract class LineStatusMarkerPopupRenderer extends LineStatusMarkerRend
       if (!myTracker.isValid()) return;
       DiffApplicationSettings.getInstance().SHOW_LST_WORD_DIFFERENCES = state;
 
-      Range newRange = myTracker.findRange(myRange);
-      if (newRange != null) {
-        showHintAt(myEditor, newRange, myMousePosition);
-      }
+      reopenRange(myEditor, myRange, myMousePosition);
     }
   }
 }

@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.changeSignature;
 
 import com.intellij.codeInsight.highlighting.HighlightManager;
@@ -30,6 +16,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
@@ -76,15 +63,17 @@ public abstract class CallerChooserBase<M extends PsiElement> extends DialogWrap
 
   protected abstract M[] findDeepestSuperMethods(M method);
 
+  @NlsContexts.Label
   protected String getEmptyCalleeText() {
     return "";
   }
 
+  @NlsContexts.Label
   protected String getEmptyCallerText() {
     return "";
   }
 
-  public CallerChooserBase(M method, Project project, @NlsContexts.DialogTitle String title, Tree previousTree, String fileName, Consumer<? super Set<M>> callback) {
+  public CallerChooserBase(M method, Project project, @NlsContexts.DialogTitle String title, Tree previousTree, @NlsSafe String fileName, Consumer<? super Set<M>> callback) {
     super(true);
     myMethod = method;
     myProject = project;
@@ -201,9 +190,12 @@ public abstract class CallerChooserBase<M extends PsiElement> extends DialogWrap
     final PsiFile file = method.getContainingFile();
     Document document = file != null ? PsiDocumentManager.getInstance(myProject).getDocument(file) : null;
     if (document != null) {
-      final int start = document.getLineStartOffset(document.getLineNumber(method.getTextRange().getStartOffset()));
-      final int end = document.getLineEndOffset(document.getLineNumber(method.getTextRange().getEndOffset()));
-      return document.getText().substring(start, end);
+      TextRange textRange = method.getTextRange();
+      if (textRange != null) {
+        final int start = document.getLineStartOffset(document.getLineNumber(textRange.getStartOffset()));
+        final int end = document.getLineEndOffset(document.getLineNumber(textRange.getEndOffset()));
+        return document.getText().substring(start, end);
+      }
     }
     return "";
   }
@@ -236,7 +228,7 @@ public abstract class CallerChooserBase<M extends PsiElement> extends DialogWrap
     return RefactoringBundle.message("caller.chooser.callee.method");
   }
 
-  private Editor createEditor() {
+  protected Editor createEditor() {
     final EditorFactory editorFactory = EditorFactory.getInstance();
     final Document document = editorFactory.createDocument("");
     final Editor editor = editorFactory.createViewer(document, myProject);

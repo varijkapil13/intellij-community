@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.lang.documentation;
 
 import com.intellij.codeInsight.documentation.DocumentationManagerProtocol;
@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * This extension point allows to contribute content to the following IDE features:
+ * Contributes content to the following IDE features:
  * <ul>
  *   <li>Quick Documentation (invoked via explicit action or shown on mouse hover)</li>
  *   <li>Navigation info (shown in editor on Ctrl/Cmd+mouse hover)</li>
@@ -29,6 +29,10 @@ import java.util.function.Consumer;
  * </ul>
  * <p>
  * Extend {@link AbstractDocumentationProvider}.
+ * <p>
+ * Language-specific instance should be registered in {@code com.intellij.lang.documentationProvider} extension point; otherwise use
+ * {@code com.intellij.documentationProvider}.
+ * </p>
  *
  * @see com.intellij.lang.LanguageDocumentation
  * @see DocumentationProviderEx
@@ -38,7 +42,7 @@ import java.util.function.Consumer;
 public interface DocumentationProvider {
 
   /**
-   * Please use {@link com.intellij.lang.LanguageDocumentation} instead of this for language-specific documentation
+   * Please use {@code com.intellij.lang.documentationProvider} instead of this for language-specific documentation.
    */
   ExtensionPointName<DocumentationProvider> EP_NAME = ExtensionPointName.create("com.intellij.documentationProvider");
 
@@ -117,7 +121,7 @@ public interface DocumentationProvider {
    */
   @Deprecated
   @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
-  default @Nullable String generateRenderedDoc(@NotNull PsiElement element) {
+  default @Nullable @NlsSafe String generateRenderedDoc(@NotNull PsiElement element) {
     return null;
   }
 
@@ -127,7 +131,7 @@ public interface DocumentationProvider {
    * @see #collectDocComments(PsiFile, Consumer)
    */
   @ApiStatus.Experimental
-  default @Nullable String generateRenderedDoc(@NotNull PsiDocCommentBase comment) {
+  default @Nullable @NlsSafe String generateRenderedDoc(@NotNull PsiDocCommentBase comment) {
     PsiElement target = comment.getOwner();
     return generateRenderedDoc(target == null ? comment : target);
   }
@@ -142,7 +146,7 @@ public interface DocumentationProvider {
    * documentation view to work correctly.
    */
   @ApiStatus.Experimental
-  default void collectDocComments(@NotNull PsiFile file, @NotNull Consumer<@NotNull PsiDocCommentBase> sink) {}
+  default void collectDocComments(@NotNull PsiFile file, @NotNull Consumer<? super @NotNull PsiDocCommentBase> sink) {}
 
   /**
    * This method is needed to support rendered representation of documentation comments in editor. It should return doc comment located at

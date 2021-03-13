@@ -7,6 +7,7 @@ import com.intellij.openapi.util.NlsActions.ActionText;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBViewport;
@@ -50,11 +51,11 @@ public abstract class ToolbarDecorator implements CommonActionsPanel.ListenerFac
   protected AnActionButtonRunnable myRemoveAction;
   protected AnActionButtonRunnable myUpAction;
   protected AnActionButtonRunnable myDownAction;
-  private String myAddName;
-  private String myEditName;
-  private String myRemoveName;
-  private String myMoveUpName;
-  private String myMoveDownName;
+  private @NlsContexts.Button String myAddName;
+  private @NlsContexts.Button String myEditName;
+  private @NlsContexts.Button String myRemoveName;
+  private @NlsContexts.Button String myMoveUpName;
+  private @NlsContexts.Button String myMoveDownName;
   private AnActionButtonUpdater myAddActionUpdater;
   private AnActionButtonUpdater myRemoveActionUpdater;
   private AnActionButtonUpdater myEditActionUpdater;
@@ -86,7 +87,9 @@ public abstract class ToolbarDecorator implements CommonActionsPanel.ListenerFac
 
   @NotNull
   public ToolbarDecorator initPosition() {
-    setToolbarPosition(SystemInfo.isMac ? ActionToolbarPosition.BOTTOM : ActionToolbarPosition.RIGHT);
+    setToolbarPosition(SystemInfo.isMac && Registry.is("action.toolbar.position.bottom.on.mac")
+                       ? ActionToolbarPosition.BOTTOM
+                       : ActionToolbarPosition.TOP);
     return this;
   }
 

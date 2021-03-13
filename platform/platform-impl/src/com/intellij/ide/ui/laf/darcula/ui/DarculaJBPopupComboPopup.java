@@ -9,7 +9,6 @@ import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.popup.list.ComboBoxPopup;
-import com.intellij.ui.popup.list.ListPopupImpl;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -272,7 +271,7 @@ public class DarculaJBPopupComboPopup<T> implements ComboPopup, ComboBoxPopup.Co
   }
 
   protected ComboBoxPopup<T> createPopup(@Nullable T selectedItem) {
-    return new ComboBoxPopup<T>(this, selectedItem, value -> myComboBox.setSelectedItem(value)) {
+    return new ComboBoxPopup<>(this, selectedItem, value -> myComboBox.setSelectedItem(value)) {
       @Override
       public void cancel(InputEvent e) {
         if (e instanceof MouseEvent) {
@@ -304,7 +303,31 @@ public class DarculaJBPopupComboPopup<T> implements ComboPopup, ComboBoxPopup.Co
 
     @Override
     public AccessibleStateSet getAccessibleStateSet() {
-      return null;
+      AccessibleStateSet stateSet = new AccessibleStateSet();
+      if (DarculaJBPopupComboPopup.this.isVisible()) {
+        stateSet.add(AccessibleState.VISIBLE);
+      }
+      stateSet.add(AccessibleState.ENABLED);
+      AccessibleContext ac = myComboBox.getAccessibleContext();
+      if (ac != null) {
+        Accessible ap = ac.getAccessibleParent();
+        if (ap != null) {
+          AccessibleContext pac = ap.getAccessibleContext();
+          if (pac != null) {
+            AccessibleSelection as = pac.getAccessibleSelection();
+            if (as != null) {
+              stateSet.add(AccessibleState.SELECTABLE);
+              int i = ac.getAccessibleIndexInParent();
+              if (i >= 0) {
+                if (as.isAccessibleChildSelected(i)) {
+                  stateSet.add(AccessibleState.SELECTED);
+                }
+              }
+            }
+          }
+        }
+      }
+      return stateSet;
     }
 
     @Override

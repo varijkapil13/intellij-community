@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.actions.searcheverywhere;
 
 import com.intellij.ide.IdeBundle;
@@ -19,6 +19,8 @@ import com.intellij.openapi.keymap.impl.ActionShortcutRestrictions;
 import com.intellij.openapi.keymap.impl.ui.KeymapPanel;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.util.Processor;
@@ -64,10 +66,11 @@ public class ActionSearchEverywhereContributor implements WeightedSearchEverywhe
   @Override
   public String getAdvertisement() {
     ShortcutSet altEnterShortcutSet = getActiveKeymapShortcuts(IdeActions.ACTION_SHOW_INTENTION_ACTIONS);
-    String altEnter = getFirstKeyboardShortcutText(altEnterShortcutSet);
-    return "Press " + altEnter + " to assign a shortcut";
+    @NlsSafe String altEnter = getFirstKeyboardShortcutText(altEnterShortcutSet);
+    return IdeBundle.message("press.0.to.assign.a.shortcut", altEnter);
   }
 
+  @NlsContexts.Checkbox
   public String includeNonProjectItemsText() {
     return IdeBundle.message("checkbox.disabled.included");
   }
@@ -177,17 +180,14 @@ public class ActionSearchEverywhereContributor implements WeightedSearchEverywhe
     if (selected instanceof BooleanOptionDescription) {
       final BooleanOptionDescription option = (BooleanOptionDescription)selected;
       if (selected instanceof BooleanOptionDescription.RequiresRebuild) {
-        myModel.clearActions();           // release references to plugin actions so that the plugin can be unloaded successfully
+        myModel.clearCaches(); // release references to plugin actions so that the plugin can be unloaded successfully
         myProvider.clearIntentions();
       }
       option.setOptionState(!option.isOptionEnabled());
-      if (selected instanceof BooleanOptionDescription.RequiresRebuild) {
-        myModel.rebuildActions();
-      }
       return false;
     }
 
-    GotoActionAction.openOptionOrPerformAction(selected, text, myProject, myContextComponent.get());
+    GotoActionAction.openOptionOrPerformAction(selected, text, myProject, myContextComponent.get(), modifiers);
     boolean inplaceChange = selected instanceof GotoActionModel.ActionWrapper
                             && ((GotoActionModel.ActionWrapper)selected).getAction() instanceof ToggleAction;
     return !inplaceChange;
@@ -231,6 +231,11 @@ public class ActionSearchEverywhereContributor implements WeightedSearchEverywhe
         initEvent.getProject(),
         initEvent.getData(PlatformDataKeys.CONTEXT_COMPONENT),
         initEvent.getData(CommonDataKeys.EDITOR));
+    }
+
+    @Override
+    public @NotNull SearchEverywhereTabDescriptor getTab() {
+      return SearchEverywhereTabDescriptor.IDE;
     }
   }
 }

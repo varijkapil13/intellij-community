@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.*;
@@ -12,7 +12,6 @@ import com.intellij.codeInsight.editorActions.TabOutScopesTracker;
 import com.intellij.codeInsight.guess.GuessManager;
 import com.intellij.codeInsight.lookup.*;
 import com.intellij.codeInspection.java15api.Java15APIUsageInspection;
-import com.intellij.lang.StdLanguages;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -33,6 +32,7 @@ import com.intellij.psi.impl.FakePsiElement;
 import com.intellij.psi.impl.light.LightVariableBuilder;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.PsiImmediateClassType;
+import com.intellij.psi.jsp.JspxLanguage;
 import com.intellij.psi.scope.ElementClassHint;
 import com.intellij.psi.scope.NameHint;
 import com.intellij.psi.scope.PsiScopeProcessor;
@@ -47,7 +47,7 @@ import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import com.siyeh.ig.psiutils.SideEffectChecker;
-import gnu.trove.THashSet;
+import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -81,7 +81,7 @@ public final class JavaCompletionUtil {
   public static Set<PsiType> getExpectedTypes(final CompletionParameters parameters) {
     final PsiExpression expr = PsiTreeUtil.getContextOfType(parameters.getPosition(), PsiExpression.class, true);
     if (expr != null) {
-      final Set<PsiType> set = new THashSet<>();
+      final Set<PsiType> set = new HashSet<>();
       for (final ExpectedTypeInfo expectedInfo : JavaSmartCompletionContributor.getExpectedTypes(parameters)) {
         set.add(expectedInfo.getType());
       }
@@ -142,7 +142,7 @@ public final class JavaCompletionUtil {
     }
 
     T result = new PsiTypeMapper() {
-      private final Set<PsiClassType> myVisited = ContainerUtil.newIdentityTroveSet();
+      private final Set<PsiClassType> myVisited = new ReferenceOpenHashSet<>();
 
       @Override
       public PsiType visitClassType(@NotNull final PsiClassType classType) {
@@ -235,7 +235,7 @@ public final class JavaCompletionUtil {
                                                  PsiJavaCodeReferenceElement javaReference,
                                                  ElementFilter elementFilter,
                                                  JavaCompletionProcessor.Options options,
-                                                 Condition<String> nameCondition,
+                                                 Condition<? super String> nameCondition,
                                                  CompletionParameters parameters) {
     PsiElement elementParent = element.getContext();
     if (elementParent instanceof PsiReferenceExpression) {
@@ -272,7 +272,7 @@ public final class JavaCompletionUtil {
                                                                   PsiJavaCodeReferenceElement javaReference,
                                                                   ElementFilter elementFilter,
                                                                   JavaCompletionProcessor.Options options,
-                                                                  Condition<String> nameCondition,
+                                                                  Condition<? super String> nameCondition,
                                                                   CompletionParameters parameters) {
     final Set<LookupElement> set = new LinkedHashSet<>();
 
@@ -299,13 +299,16 @@ public final class JavaCompletionUtil {
 
     Set<PsiType> expectedTypes = ObjectUtils.coalesce(getExpectedTypes(parameters), Collections.emptySet());
 
-    final Set<PsiMember> mentioned = new THashSet<>();
+    final Set<PsiMember> mentioned = new HashSet<>();
     for (CompletionElement completionElement : processor.getResults()) {
       for (LookupElement item : createLookupElements(completionElement, javaReference)) {
         item.putUserData(QUALIFIER_TYPE_ATTR, plainQualifier);
         final Object o = item.getObject();
-        if (o instanceof PsiClass && !isSourceLevelAccessible(element, (PsiClass)o, pkgContext)) {
-          continue;
+        if (o instanceof PsiClass) {
+          PsiClass specifiedQualifierClass = javaReference.isQualified() ? qualifierClass : ((PsiClass)o).getContainingClass();
+          if (!isSourceLevelAccessible(element, (PsiClass)o, pkgContext, specifiedQualifierClass)) {
+            continue;
+          }
         }
         if (o instanceof PsiMember) {
           if (honorExcludes && isInExcludedPackage((PsiMember)o, true)) {
@@ -409,7 +412,7 @@ public final class JavaCompletionUtil {
 
   @NotNull
   private static LookupElement castQualifier(@NotNull LookupElement item, @NotNull PsiTypeLookupItem castTypeItem) {
-    return new LookupElementDecorator<LookupElement>(item) {
+    return new LookupElementDecorator<>(item) {
       @Override
       public void handleInsert(@NotNull InsertionContext context) {
         final Document document = context.getEditor().getDocument();
@@ -466,7 +469,7 @@ public final class JavaCompletionUtil {
                                                 @NotNull Object object,
                                                 @NotNull PsiElement place) {
     if (shouldMarkRed(object, place)) {
-      return PrioritizedLookupElement.withExplicitProximity(LookupElementDecorator.withRenderer(item, new LookupElementRenderer<LookupElementDecorator<LookupElement>>() {
+      return PrioritizedLookupElement.withExplicitProximity(LookupElementDecorator.withRenderer(item, new LookupElementRenderer<>() {
         @Override
         public void renderElement(LookupElementDecorator<LookupElement> element, LookupElementPresentation presentation) {
           element.getDelegate().renderElement(presentation);
@@ -475,7 +478,7 @@ public final class JavaCompletionUtil {
       }), -1);
     }
     if (containsMember(qualifierType, object, false) && !qualifierType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
-      LookupElementDecorator<LookupElement> bold = LookupElementDecorator.withRenderer(item, new LookupElementRenderer<LookupElementDecorator<LookupElement>>() {
+      LookupElementDecorator<LookupElement> bold = LookupElementDecorator.withRenderer(item, new LookupElementRenderer<>() {
         @Override
         public void renderElement(LookupElementDecorator<LookupElement> element, LookupElementPresentation presentation) {
           element.getDelegate().renderElement(presentation);
@@ -773,8 +776,8 @@ public final class JavaCompletionUtil {
       ThreeState hasParameters = hasParams;
       boolean spaceBetweenParentheses = hasParams == ThreeState.YES && styleSettings.SPACE_WITHIN_METHOD_CALL_PARENTHESES ||
                                         hasParams == ThreeState.UNSURE && styleSettings.SPACE_WITHIN_EMPTY_METHOD_CALL_PARENTHESES;
-      new ParenthesesInsertHandler<LookupElement>(styleSettings.SPACE_BEFORE_METHOD_CALL_PARENTHESES, spaceBetweenParentheses,
-                                                  needRightParenth, styleSettings.METHOD_PARAMETERS_LPAREN_ON_NEXT_LINE) {
+      new ParenthesesInsertHandler<>(styleSettings.SPACE_BEFORE_METHOD_CALL_PARENTHESES, spaceBetweenParentheses,
+                                     needRightParenth, styleSettings.METHOD_PARAMETERS_LPAREN_ON_NEXT_LINE) {
         @Override
         protected boolean placeCaretInsideParentheses(InsertionContext context1, LookupElement item1) {
           return hasParameters != ThreeState.NO;
@@ -873,8 +876,17 @@ public final class JavaCompletionUtil {
     return contextFile instanceof PsiClassOwner && StringUtil.isNotEmpty(((PsiClassOwner)contextFile).getPackageName());
   }
 
-  public static boolean isSourceLevelAccessible(PsiElement context, PsiClass psiClass, final boolean pkgContext) {
-    if (!JavaPsiFacade.getInstance(psiClass.getProject()).getResolveHelper().isAccessible(psiClass, context, psiClass.getContainingClass())) {
+  public static boolean isSourceLevelAccessible(@NotNull PsiElement context,
+                                                @NotNull PsiClass psiClass,
+                                                final boolean pkgContext) {
+    return isSourceLevelAccessible(context, psiClass, pkgContext, psiClass.getContainingClass());
+  }
+
+  private static boolean isSourceLevelAccessible(PsiElement context,
+                                                 @NotNull PsiClass psiClass,
+                                                 final boolean pkgContext,
+                                                 @Nullable PsiClass qualifierClass) {
+    if (!JavaPsiFacade.getInstance(psiClass.getProject()).getResolveHelper().isAccessible(psiClass, context, qualifierClass)) {
       return false;
     }
 
@@ -946,7 +958,7 @@ public final class JavaCompletionUtil {
 
   @NotNull
   public static String escapeXmlIfNeeded(InsertionContext context, @NotNull String generics) {
-    if (context.getFile().getViewProvider().getBaseLanguage() == StdLanguages.JSPX) {
+    if (context.getFile().getViewProvider().getBaseLanguage() instanceof JspxLanguage) {
       return StringUtil.escapeXmlEntities(generics);
     }
     return generics;

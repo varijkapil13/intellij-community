@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.module;
 
 import com.intellij.openapi.Disposable;
@@ -8,6 +8,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.*;
 
 import java.io.File;
@@ -29,11 +30,18 @@ public interface Module extends ComponentManager, AreaInstance, Disposable {
   @NonNls String ELEMENT_TYPE = "type";
 
   /**
+   * @deprecated Module level message bus is deprecated. Please use app- or project- level.
+   */
+  @Override
+  @Deprecated
+  @NotNull MessageBus getMessageBus();
+
+  /**
    * Returns the {@code VirtualFile} for the module .iml file. Note that location if .iml file may not be related to location of the module
    * files, it may be stored in a different directory, under .idea/modules or doesn't exist at all if the module configuration is imported
    * from external project system (e.g. Gradle). So only internal subsystems which deal with serialization are supposed to use this method.
    * If you need to find a directory (directories) where source files for the module are located, get its {@link com.intellij.openapi.roots.ModuleRootModel#getContentRoots() content roots}.
-   * If you need to get just some directory near to module files (e.g. to select by default in a file chooser), use {@link com.intellij.openapi.module.ModuleUtil#suggestBaseDirectory}.
+   * If you need to get just some directory near to module files (e.g. to select by default in a file chooser), use {@link com.intellij.openapi.project.ProjectUtil#guessModuleDir(com.intellij.openapi.module.Module)}.
    */
   @ApiStatus.Internal
   @Nullable VirtualFile getModuleFile();
@@ -42,7 +50,7 @@ public interface Module extends ComponentManager, AreaInstance, Disposable {
    * Returns path to the module .iml file. This method isn't supposed to be used from plugins, see {@link #getModuleFile()} details.
    */
   @ApiStatus.Internal
-  @SystemIndependent
+  @SystemIndependent @NonNls
   default @NotNull String getModuleFilePath() {
     return getModuleNioFile().toString().replace(File.separatorChar, '/');
   }
@@ -95,6 +103,7 @@ public interface Module extends ComponentManager, AreaInstance, Disposable {
    * @deprecated Please store options in your own {@link com.intellij.openapi.components.PersistentStateComponent}
    */
   @Deprecated
+  @NonNls
   @Nullable
   String getOptionValue(@NotNull String key);
 
@@ -161,13 +170,13 @@ public interface Module extends ComponentManager, AreaInstance, Disposable {
   @NotNull
   GlobalSearchScope getModuleRuntimeScope(boolean includeTests);
 
-  @Nullable
+  @Nullable @NonNls
   default String getModuleTypeName() {
     //noinspection deprecation
     return getOptionValue(ELEMENT_TYPE);
   }
 
-  default void setModuleType(@NotNull String name) {
+  default void setModuleType(@NotNull @NonNls String name) {
     //noinspection deprecation
     setOption(ELEMENT_TYPE, name);
   }

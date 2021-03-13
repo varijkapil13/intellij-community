@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.diagnostic.AttachmentFactory;
@@ -148,9 +148,7 @@ public class CaretImpl extends UserDataHolderBase implements Caret, Dumpable {
     if (mySkipChangeRequests) {
       return;
     }
-    if (!myEditor.isStickySelection() && !myEditor.getDocument().isInEventsHandling()) {
-      CopyPasteManager.getInstance().stopKillRings();
-    }
+    stopKillRings();
     myCaretModel.doWithCaretMerging(() -> {
       updateCachedStateIfNeeded();
 
@@ -537,8 +535,8 @@ public class CaretImpl extends UserDataHolderBase implements Caret, Dumpable {
     if (mySkipChangeRequests) {
       return;
     }
-    if (!myEditor.isStickySelection() && !myEditor.getDocument().isInEventsHandling() && !pos.equals(myVisibleCaret)) {
-      CopyPasteManager.getInstance().stopKillRings();
+    if (!pos.equals(myVisibleCaret)) {
+      stopKillRings();
     }
     updateCachedStateIfNeeded();
 
@@ -603,8 +601,8 @@ public class CaretImpl extends UserDataHolderBase implements Caret, Dumpable {
     if (mySkipChangeRequests) {
       return null;
     }
-    if (!myEditor.isStickySelection() && !myEditor.getDocument().isInEventsHandling() && !pos.equals(myLogicalCaret)) {
-      CopyPasteManager.getInstance().stopKillRings();
+    if (!pos.equals(myLogicalCaret)) {
+      stopKillRings();
     }
     return doMoveToLogicalPosition(pos, locateBeforeSoftWrap, debugBuffer, adjustForInlays, fireListeners);
   }
@@ -1251,7 +1249,7 @@ public class CaretImpl extends UserDataHolderBase implements Caret, Dumpable {
   @Override
   public void selectLineAtCaret() {
     validateContext(true);
-    myCaretModel.doWithCaretMerging(() -> SelectionModelImpl.doSelectLineAtCaret(this));
+    myCaretModel.doWithCaretMerging(() -> EditorActionUtil.selectEntireLines(this, true));
   }
 
   @Override
@@ -1469,6 +1467,12 @@ public class CaretImpl extends UserDataHolderBase implements Caret, Dumpable {
   private void checkDisposal() {
     if (myEditor.isDisposed()) myEditor.throwDisposalError("Editor is already disposed");
     if (!isValid) throw new IllegalStateException("Caret is invalid");
+  }
+
+  private void stopKillRings() {
+    if (!myEditor.isStickySelection() && !myEditor.getDocument().isInEventsHandling()) {
+      CopyPasteManager.getInstance().stopKillRings(myEditor.getDocument());
+    }
   }
 
   @TestOnly

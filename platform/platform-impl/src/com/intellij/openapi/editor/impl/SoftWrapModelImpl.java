@@ -71,7 +71,6 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
   private final SoftWrapsStorage                   myStorage;
   private       SoftWrapPainter                    myPainter;
   private final SoftWrapApplianceManager           myApplianceManager;
-  private       EditorTextRepresentationHelper     myEditorTextRepresentationHelper;
 
   @NotNull
   private final EditorImpl myEditor;
@@ -112,7 +111,6 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
     myEditor = editor;
     myStorage = new SoftWrapsStorage();
     myPainter = new CompositeSoftWrapPainter(editor);
-    myEditorTextRepresentationHelper = new DefaultEditorTextRepresentationHelper(editor);
     myDataMapper = new CachingSoftWrapDataMapper(editor, myStorage);
     myApplianceManager = new SoftWrapApplianceManager(myStorage, editor, myPainter, myDataMapper);
 
@@ -186,11 +184,9 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
     myTabWidth = EditorUtil.getTabSize(myEditor);
 
     boolean fontsChanged = false;
-    if (!myFontPreferences.equals(myEditor.getColorsScheme().getFontPreferences())
-        && myEditorTextRepresentationHelper instanceof DefaultEditorTextRepresentationHelper) {
+    if (!myFontPreferences.equals(myEditor.getColorsScheme().getFontPreferences())) {
       fontsChanged = true;
       myEditor.getColorsScheme().getFontPreferences().copyTo(myFontPreferences);
-      ((DefaultEditorTextRepresentationHelper)myEditorTextRepresentationHelper).clearSymbolWidthCache();
       myPainter.reinit();
     }
 
@@ -604,17 +600,6 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
     myApplianceManager.setSoftWrapPainter(painter);
   }
 
-  @Override
-  public EditorTextRepresentationHelper getEditorTextRepresentationHelper() {
-    return myEditorTextRepresentationHelper;
-  }
-
-  @TestOnly
-  public void setEditorTextRepresentationHelper(EditorTextRepresentationHelper editorTextRepresentationHelper) {
-    myEditorTextRepresentationHelper = editorTextRepresentationHelper;
-    myApplianceManager.reset();
-  }
-
   @NotNull
   @NonNls
   @Override
@@ -623,7 +608,7 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
                          "update in progress: %b, bulk update in progress: %b, dirty: %b, deferred regions: %s" +
                          "\nappliance manager state: %s\nsoft wraps mapping info: %s\nsoft wraps: %s",
                          myUseSoftWraps, myTabWidth, myForceAdditionalColumns, myUpdateInProgress, myBulkUpdateInProgress,
-                         myDirty, myDeferredFoldRegions.toString(),
+                         myDirty, myDeferredFoldRegions,
                          myApplianceManager.dumpState(), myDataMapper.dumpState(), myStorage.dumpState());
   }
 

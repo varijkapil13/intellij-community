@@ -10,7 +10,7 @@ import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.newvfs.persistent.FlushingDaemon;
+import com.intellij.util.FlushingDaemon;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.EnumeratorStringDescriptor;
 import com.intellij.util.io.IOUtil;
@@ -36,7 +36,7 @@ public class TestStateStorage implements Disposable {
 
   private final File myFile;
 
-  public static File getTestHistoryRoot(Project project) {
+  public static File getTestHistoryRoot(@NotNull Project project) {
     return new File(TEST_HISTORY_PATH, project.getLocationHash());
   }
 

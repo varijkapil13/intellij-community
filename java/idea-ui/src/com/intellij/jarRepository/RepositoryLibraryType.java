@@ -35,7 +35,7 @@ import javax.swing.*;
 public class RepositoryLibraryType extends LibraryType<RepositoryLibraryProperties> {
 
   public static final PersistentLibraryKind<RepositoryLibraryProperties>
-    REPOSITORY_LIBRARY_KIND = new PersistentLibraryKind<RepositoryLibraryProperties>("repository") {
+    REPOSITORY_LIBRARY_KIND = new PersistentLibraryKind<>("repository") {
     @NotNull
     @Override
     public RepositoryLibraryProperties createDefaultProperties() {
@@ -82,7 +82,8 @@ public class RepositoryLibraryType extends LibraryType<RepositoryLibraryProperti
   @Override
   public String getDescription(@NotNull RepositoryLibraryProperties properties) {
     RepositoryLibraryDescription description = RepositoryLibraryDescription.findDescription(properties);
-    return "Maven: " + description.getDisplayName(properties.getVersion());
+    final String name = description.getDisplayName(properties.getVersion());
+    return JavaUiBundle.message("repository.library.type.maven.description", name);
   }
 
   @Nullable

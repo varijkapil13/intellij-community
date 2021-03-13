@@ -9,6 +9,7 @@ import com.intellij.openapi.extensions.ExtensionPoint;
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl;
 import com.intellij.openapi.extensions.impl.ExtensionProcessingHelper;
 import com.intellij.openapi.extensions.impl.ExtensionsAreaImpl;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.KeyedExtensionCollector;
 import com.intellij.openapi.vfs.*;
@@ -227,6 +228,9 @@ public class VirtualFileManagerImpl extends VirtualFileManagerEx implements Disp
       try {
         listener.beforeRefreshStart(asynchronous);
       }
+      catch (ProcessCanceledException e) {
+        throw e;
+      }
       catch (Exception e) {
         LOG.error(e);
       }
@@ -244,6 +248,9 @@ public class VirtualFileManagerImpl extends VirtualFileManagerEx implements Disp
     for (final VirtualFileManagerListener listener : myVirtualFileManagerListeners) {
       try {
         listener.afterRefreshFinish(asynchronous);
+      }
+      catch (ProcessCanceledException e) {
+        throw e;
       }
       catch (Exception e) {
         LOG.error(e);
@@ -328,35 +335,39 @@ public class VirtualFileManagerImpl extends VirtualFileManagerEx implements Disp
 
   @Override
   public VirtualFile findFileByUrl(@NotNull String url) {
-    int protocolSepIndex = url.indexOf(URLUtil.SCHEME_SEPARATOR);
-    VirtualFileSystem fileSystem = protocolSepIndex < 0 ? null : getFileSystem(url.substring(0, protocolSepIndex));
-    if (fileSystem == null) return null;
-    String path = url.substring(protocolSepIndex + URLUtil.SCHEME_SEPARATOR.length());
-    return fileSystem.findFileByPath(path);
+    return findByUrl(url, false);
   }
 
   @Override
   public VirtualFile refreshAndFindFileByUrl(@NotNull String url) {
+    return findByUrl(url, true);
+  }
+
+  @Nullable
+  private VirtualFile findByUrl(@NotNull String url, boolean refresh) {
     int protocolSepIndex = url.indexOf(URLUtil.SCHEME_SEPARATOR);
     VirtualFileSystem fileSystem = protocolSepIndex < 0 ? null : getFileSystem(url.substring(0, protocolSepIndex));
     if (fileSystem == null) return null;
     String path = url.substring(protocolSepIndex + URLUtil.SCHEME_SEPARATOR.length());
-    return fileSystem.refreshAndFindFileByPath(path);
+    return refresh ? fileSystem.refreshAndFindFileByPath(path) : fileSystem.findFileByPath(path);
   }
 
   @Override
   public @Nullable VirtualFile findFileByNioPath(@NotNull Path path) {
-    if (!FileSystems.getDefault().equals(path.getFileSystem())) return null;
-    VirtualFileSystem fileSystem = getFileSystem(StandardFileSystems.FILE_PROTOCOL);
-    if (fileSystem == null) return null;
-    return fileSystem.findFileByPath(path.toString());
+    return findByNioPath(path, false);
   }
 
   @Override
   public @Nullable VirtualFile refreshAndFindFileByNioPath(@NotNull Path path) {
-    if (!FileSystems.getDefault().equals(path.getFileSystem())) return null;
+    return findByNioPath(path, true);
+  }
+
+  @Nullable
+  private VirtualFile findByNioPath(@NotNull Path nioPath, boolean refresh) {
+    if (!FileSystems.getDefault().equals(nioPath.getFileSystem())) return null;
     VirtualFileSystem fileSystem = getFileSystem(StandardFileSystems.FILE_PROTOCOL);
     if (fileSystem == null) return null;
-    return fileSystem.refreshAndFindFileByPath(path.toString());
+    String path = nioPath.toString();
+    return refresh ? fileSystem.refreshAndFindFileByPath(path) : fileSystem.findFileByPath(path);
   }
 }

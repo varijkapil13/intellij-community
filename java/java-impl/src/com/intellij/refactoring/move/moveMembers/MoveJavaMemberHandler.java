@@ -6,6 +6,7 @@ import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
 import com.intellij.codeInsight.highlighting.ReadWriteAccessDetector;
 import com.intellij.java.JavaBundle;
+import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -100,7 +101,8 @@ public class MoveJavaMemberHandler implements MoveMemberHandler {
       if (accessDetector != null) {
         ReadWriteAccessDetector.Access access = accessDetector.getExpressionAccess(element);
         if (access != ReadWriteAccessDetector.Access.Read) {
-          String message = RefactoringUIUtil.getDescription(member, true) + " has write access but is moved to an interface";
+          String message =
+            JavaRefactoringBundle.message("move.member.write.access.in.interface.conflict", RefactoringUIUtil.getDescription(member, true));
           conflicts.putValue(element, StringUtil.capitalize(message));
         }
       }
@@ -232,8 +234,14 @@ public class MoveJavaMemberHandler implements MoveMemberHandler {
         // might need to make modifiers explicit, see IDEADEV-11416
         final PsiModifierList list = memberCopy.getModifierList();
         assert list != null;
-        list.setModifierProperty(PsiModifier.STATIC, member.hasModifierProperty(PsiModifier.STATIC));
-        list.setModifierProperty(PsiModifier.FINAL, member.hasModifierProperty(PsiModifier.FINAL));
+
+        if (!(member instanceof PsiClass && (((PsiClass)member).isEnum() || ((PsiClass)member).isInterface()))) {
+          list.setModifierProperty(PsiModifier.STATIC, member.hasModifierProperty(PsiModifier.STATIC));
+        }
+        if (!(member instanceof PsiClass && ((PsiClass)member).isEnum())) { 
+          list.setModifierProperty(PsiModifier.FINAL, member.hasModifierProperty(PsiModifier.FINAL));
+        }
+
         VisibilityUtil.setVisibility(list, VisibilityUtil.getVisibilityModifier(member.getModifierList()));
       }
     }

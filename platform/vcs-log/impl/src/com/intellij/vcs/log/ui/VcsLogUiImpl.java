@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui;
 
 import com.google.common.util.concurrent.SettableFuture;
@@ -12,6 +12,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.PairFunction;
 import com.intellij.vcs.log.VcsLogBundle;
 import com.intellij.vcs.log.VcsLogFilterCollection;
+import com.intellij.vcs.log.VcsLogHighlighter;
 import com.intellij.vcs.log.data.VcsLogData;
 import com.intellij.vcs.log.impl.CommonUiProperties;
 import com.intellij.vcs.log.impl.MainVcsLogUiProperties;
@@ -22,11 +23,13 @@ import com.intellij.vcs.log.ui.filter.VcsLogClassicFilterUi;
 import com.intellij.vcs.log.ui.filter.VcsLogFilterUiEx;
 import com.intellij.vcs.log.ui.frame.MainFrame;
 import com.intellij.vcs.log.ui.frame.VcsLogEditorDiffPreview;
-import com.intellij.vcs.log.ui.table.GraphTableModel;
-import com.intellij.vcs.log.ui.table.VcsLogColumn;
+import com.intellij.vcs.log.ui.highlighters.VcsLogHighlighterFactory;
 import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
+import com.intellij.vcs.log.ui.table.column.Date;
+import com.intellij.vcs.log.ui.table.column.TableColumnWidthProperty;
 import com.intellij.vcs.log.util.VcsLogUiUtil;
 import com.intellij.vcs.log.util.VcsLogUtil;
+import com.intellij.vcs.log.visible.VisiblePack;
 import com.intellij.vcs.log.visible.VisiblePackRefresher;
 import com.intellij.vcs.log.visible.filters.VcsLogFilterObject;
 import org.jetbrains.annotations.NonNls;
@@ -35,6 +38,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
@@ -44,6 +48,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
   @NotNull private final MainFrame myMainFrame;
   @NotNull private final MyVcsLogUiPropertiesListener myPropertiesListener;
   @NotNull private final History myHistory;
+  @NotNull private final LinkedHashMap<String, VcsLogHighlighter> myHighlighters = new LinkedHashMap<>();
 
   public VcsLogUiImpl(@NotNull String id,
                       @NotNull VcsLogData logData,
@@ -57,7 +62,8 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
     VcsLogFilterUiEx filterUi = createFilterUi(filters -> applyFiltersAndUpdateUi(filters), initialFilters, this);
     myMainFrame = createMainFrame(logData, uiProperties, filterUi);
 
-    VcsLogUiUtil.installHighlighters(this, f -> true);
+    LOG_HIGHLIGHTER_FACTORY_EP.addChangeListener(this::updateHighlighters, this);
+    updateHighlighters();
 
     myPropertiesListener = new MyVcsLogUiPropertiesListener();
     myUiProperties.addChangeListener(myPropertiesListener);
@@ -99,7 +105,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
   @Override
   protected <T> void handleCommitNotFound(@NotNull T commitId,
                                           boolean commitExists,
-                                          @NotNull PairFunction<GraphTableModel, T, Integer> rowGetter) {
+                                          @NotNull PairFunction<? super VisiblePack, ? super T, Integer> rowGetter) {
     if (getFilterUi().getFilters().isEmpty() || !commitExists) {
       super.handleCommitNotFound(commitId, commitExists, rowGetter);
       return;
@@ -110,7 +116,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
       @Override
       public void run() {
         getFilterUi().clearFilters();
-        invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false),
+        invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false, true),
                        pack -> pack.getFilters().isEmpty());
       }
     });
@@ -121,7 +127,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
         public void run() {
           MainVcsLogUi ui = projectLog.openLogTab(VcsLogFilterObject.collection());
           if (ui != null) {
-            VcsLogUtil.invokeOnChange(ui, () -> ui.jumpTo(commitId, rowGetter, SettableFuture.create(), false),
+            VcsLogUtil.invokeOnChange(ui, () -> ui.jumpTo(commitId, rowGetter, SettableFuture.create(), false, true),
                                       pack -> pack.getFilters().isEmpty());
           }
         }
@@ -131,7 +137,6 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
                                                   runnables.toArray(new NamedRunnable[0]));
   }
 
-  @Override
   public boolean isHighlighterEnabled(@NotNull String id) {
     VcsLogHighlighterProperty property = VcsLogHighlighterProperty.get(id);
     return myUiProperties.exists(property) && myUiProperties.get(property);
@@ -198,6 +203,21 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
     super.dispose();
   }
 
+  private void updateHighlighters() {
+    myHighlighters.forEach((s, highlighter) -> getTable().removeHighlighter(highlighter));
+    myHighlighters.clear();
+
+    for (VcsLogHighlighterFactory factory : LOG_HIGHLIGHTER_FACTORY_EP.getExtensionList()) {
+      VcsLogHighlighter highlighter = factory.createHighlighter(myLogData, this);
+      myHighlighters.put(factory.getId(), highlighter);
+      if (isHighlighterEnabled(factory.getId())) {
+        getTable().addHighlighter(highlighter);
+      }
+    }
+
+    getTable().repaint();
+  }
+
   private class MyVcsLogUiPropertiesListener implements VcsLogUiProperties.PropertiesChangeListener {
 
     @Override
@@ -223,16 +243,23 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
       else if (MainVcsLogUiProperties.BEK_SORT_TYPE.equals(property)) {
         myRefresher.onSortTypeChange(myUiProperties.get(MainVcsLogUiProperties.BEK_SORT_TYPE));
       }
-      else if (CommonUiProperties.COLUMN_ORDER.equals(property)) {
+      else if (CommonUiProperties.COLUMN_ID_ORDER.equals(property)) {
         getTable().onColumnOrderSettingChanged();
       }
       else if (property instanceof VcsLogHighlighterProperty) {
+        VcsLogHighlighter highlighter = myHighlighters.get(((VcsLogHighlighterProperty)property).getId());
+        if ((boolean)myUiProperties.get(property)) {
+          getTable().addHighlighter(highlighter);
+        }
+        else {
+          getTable().removeHighlighter(highlighter);
+        }
         getTable().repaint();
       }
-      else if (property instanceof CommonUiProperties.TableColumnProperty) {
-        getTable().forceReLayout(((CommonUiProperties.TableColumnProperty)property).getColumn());
+      else if (property instanceof TableColumnWidthProperty) {
+        getTable().forceReLayout(((TableColumnWidthProperty)property).getColumn());
       }
-      else if (property.equals(CommonUiProperties.PREFER_COMMIT_DATE) && getTable().getTableColumn(VcsLogColumn.DATE) != null) {
+      else if (property.equals(CommonUiProperties.PREFER_COMMIT_DATE) && getTable().getTableColumn(Date.INSTANCE) != null) {
         getTable().repaint();
       }
     }

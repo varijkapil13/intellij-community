@@ -122,9 +122,12 @@ public class PushDownConflicts {
             if (unrelatedDefaults.size() > 1) {
               List<PsiClass> supers = new ArrayList<>(unrelatedDefaults);
               supers.sort(Comparator.comparing(PsiClass::getName));
+              PsiClass lastClass = supers.remove(supers.size() - 1);
               myConflicts.putValue(member, StringUtil
-                .capitalize(RefactoringUIUtil.getDescription(myClass, false) + " will inherit unrelated defaults from " +
-                            StringUtil.join(supers, aClass -> RefactoringUIUtil.getDescription(aClass, false), " and ")));
+                .capitalize(JavaRefactoringBundle
+                              .message("push.down.unrelated.defaults.conflict", RefactoringUIUtil.getDescription(myClass, false),
+                                       StringUtil.join(supers, aClass -> RefactoringUIUtil.getDescription(aClass, false), ", "),
+                                       RefactoringUIUtil.getDescription(lastClass, false))));
               break;
             }
           }
@@ -187,7 +190,8 @@ public class PushDownConflicts {
       String name = movedMember.getName();
       final PsiField field = targetClass.findFieldByName(name, false);
       if (field != null) {
-        String message = JavaRefactoringBundle.message("0.already.contains.field.1", RefactoringUIUtil.getDescription(targetClass, false), CommonRefactoringUtil.htmlEmphasize(name));
+        String message = JavaRefactoringBundle.message("0.already.contains.field.1", RefactoringUIUtil.getDescription(targetClass, false), 
+                                                       CommonRefactoringUtil.htmlEmphasize(name));
         myConflicts.putValue(field, StringUtil.capitalize(message));
       }
     }

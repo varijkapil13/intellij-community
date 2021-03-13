@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.terminal;
 
+import com.intellij.ide.DataManager;
 import com.intellij.ide.GeneralSettings;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.SaveAndSyncHandler;
@@ -15,11 +16,16 @@ import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.impl.ComplementaryFontsRegistry;
 import com.intellij.openapi.editor.impl.FontInfo;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.wm.ToolWindow;
+import com.intellij.ui.components.JBScrollBar;
+import com.intellij.ui.scale.JBUIScale;
+import com.intellij.ui.scroll.TouchScrollUtil;
 import com.intellij.util.JBHiDPIScaledImage;
 import com.intellij.util.ui.ImageUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.jediterm.terminal.TerminalCopyPasteHandler;
 import com.jediterm.terminal.TextStyle;
@@ -41,7 +47,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
-public class JBTerminalPanel extends TerminalPanel implements FocusListener, TerminalSettingsListener, Disposable {
+public class JBTerminalPanel extends TerminalPanel implements FocusListener, Disposable {
   private static final Logger LOG = Logger.getInstance(JBTerminalPanel.class);
   private static final @NonNls String[] ACTIONS_TO_SKIP = new String[]{
     "ActivateTerminalToolWindow",
@@ -92,14 +98,16 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     "ResizeToolWindowRight",
     "ResizeToolWindowUp",
     "ResizeToolWindowDown",
-    "MaximizeToolWindow"
+    "MaximizeToolWindow",
+    
+    "MaintenanceAction"
   };
   private static final int MIN_FONT_SIZE = 8;
 
   private final TerminalEventDispatcher myEventDispatcher = new TerminalEventDispatcher();
   private final JBTerminalSystemSettingsProviderBase mySettingsProvider;
   private final TerminalEscapeKeyListener myEscapeKeyListener;
-  private final List<Consumer<KeyEvent>> myPreKeyEventConsumers = new CopyOnWriteArrayList<>();
+  private final List<Consumer<? super KeyEvent>> myPreKeyEventConsumers = new CopyOnWriteArrayList<>();
 
   private List<AnAction> myActionsToSkip;
 
@@ -112,8 +120,64 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
 
     addFocusListener(this);
 
-    mySettingsProvider.addListener(this);
+    mySettingsProvider.getUiSettingsManager().addListener(this);
     myEscapeKeyListener = new TerminalEscapeKeyListener(this);
+  }
+
+  @Override
+  public Dimension getMinimumSize() {
+    if (isMinimumSizeSet()) {
+      return super.getMinimumSize();
+    }
+    return JBUI.emptySize();
+  }
+
+  @Override
+  protected void handleMouseWheelEvent(@NotNull MouseWheelEvent event, @NotNull JScrollBar scrollBar) {
+    // TODO replace with standard JBScrollPane in 2021.2 and remove this method!
+    if (event.isShiftDown() || event.getUnitsToScroll() == 0) return;
+    if (isNiceScrollingSupported(event)) {
+      MouseWheelEvent e = event;
+      if (Registry.is("idea.true.smooth.scrolling.pixel.perfect", true)) {
+        // Terminal's scrollBar.getModel() operates with lines, not pixel. So we need to covert back to units
+        // according to com.intellij.ui.components.JBScrollBar.getPreciseDelta implementation.
+        e = copyEventWithScaledRotation(event, JBUIScale.scale(10));
+      }
+      boolean handled = ((JBScrollBar)scrollBar).handleMouseWheelEvent(e);
+      if (!handled && LOG.isDebugEnabled()) {
+        LOG.debug("Mouse wheel event not handled");
+      }
+    }
+    else {
+      super.handleMouseWheelEvent(event, scrollBar);
+    }
+  }
+
+  private static boolean isNiceScrollingSupported(@NotNull MouseWheelEvent event) {
+    if (!isSupportedScrollType(event)) return false;
+    UISettings settings = UISettings.getInstanceOrNull();
+    return settings != null && settings.getSmoothScrolling();
+  }
+
+  private static boolean isSupportedScrollType(MouseWheelEvent e) {
+    return e.getScrollType() == MouseWheelEvent.WHEEL_UNIT_SCROLL || TouchScrollUtil.isUpdate(e);
+  }
+
+  private @NotNull MouseWheelEvent copyEventWithScaledRotation(@NotNull MouseWheelEvent e, int rotationScaleFactor) {
+    return new MouseWheelEvent(this,
+                               e.getID(),
+                               e.getWhen(),
+                               e.getModifiers(),
+                               e.getX(),
+                               e.getY(),
+                               e.getXOnScreen(),
+                               e.getYOnScreen(),
+                               e.getClickCount(),
+                               e.isPopupTrigger(),
+                               e.getScrollType(),
+                               e.getScrollAmount(),
+                               e.getWheelRotation() / rotationScaleFactor,
+                               e.getPreciseWheelRotation() / rotationScaleFactor);
   }
 
   private boolean skipKeyEvent(@NotNull KeyEvent e) {
@@ -142,16 +206,8 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
 
   @Override
   public void handleKeyEvent(@NotNull KeyEvent e) {
-    if (SystemInfo.isMac && SystemInfo.isJavaVersionAtLeast(11, 0, 0)) {
-      // Workaround for https://youtrack.jetbrains.com/issue/JBR-1098
-      // sun.lwawt.macosx.CPlatformResponder.mapNsCharsToCompatibleWithJava converts 0x0003 (NSEnterCharacter) to 0x000a
-      if (e.getKeyChar() == KeyEvent.VK_ENTER && e.getKeyCode() == KeyEvent.VK_C && e.getModifiersEx() == InputEvent.CTRL_DOWN_MASK) {
-        LOG.debug("Fixing Ctrl+C");
-        e.setKeyChar((char)3);
-      }
-    }
     myEscapeKeyListener.handleKeyEvent(e);
-    for (Consumer<KeyEvent> preKeyEventConsumer : myPreKeyEventConsumers) {
+    for (Consumer<? super KeyEvent> preKeyEventConsumer : myPreKeyEventConsumers) {
       preKeyEventConsumer.accept(e);
     }
     if (!e.isConsumed()) {
@@ -159,7 +215,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     }
   }
 
-  public void addPreKeyEventHandler(@NotNull Consumer<KeyEvent> preKeyEventHandler) {
+  public void addPreKeyEventHandler(@NotNull Consumer<? super KeyEvent> preKeyEventHandler) {
     myPreKeyEventConsumers.add(preKeyEventHandler);
   }
 
@@ -269,7 +325,6 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     return ComplementaryFontsRegistry.getFontAbleToDisplay(c, style, mySettingsProvider.getColorsScheme().getConsoleFontPreferences(), null);
   }
 
-  @Override
   public void fontChanged() {
     reinitFontAndResize();
   }
@@ -277,7 +332,6 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
   @Override
   public void dispose() {
     super.dispose();
-    mySettingsProvider.removeListener(this);
   }
 
   @Override
@@ -285,12 +339,19 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     if (EditorSettingsExternalizable.getInstance().isWheelFontChangeEnabled() && EditorUtil.isChangeFontSize(e)) {
       int newFontSize = (int)mySettingsProvider.getTerminalFontSize() - e.getWheelRotation();
       if (newFontSize >= MIN_FONT_SIZE) {
-        mySettingsProvider.getColorsScheme().setConsoleFontSize(newFontSize);
-        mySettingsProvider.fireFontChanged();
+        mySettingsProvider.getUiSettingsManager().setConsoleFontSize(newFontSize);
       }
       return;
     }
     super.processMouseWheelEvent(e);
+  }
+
+  @Nullable ToolWindow getContextToolWindow() {
+    return DataManager.getInstance().getDataContext(this).getData(PlatformDataKeys.TOOL_WINDOW);
+  }
+
+  @Nullable Project getContextProject() {
+    return DataManager.getInstance().getDataContext(this).getData(CommonDataKeys.PROJECT);
   }
 
   /**
@@ -320,12 +381,9 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
           LOG.debug("Consuming " + KeyStroke.getKeyStrokeForEvent(e) + ", registered:" + myRegistered);
         }
         IdeEventQueue.getInstance().flushDelayedKeyEvents();
-        // Workaround for https://youtrack.jetbrains.com/issue/IDEA-214830, revert once it's fixed.
-        if (SystemInfo.isJavaVersionAtLeast(8, 0, 212)) {
-          // JBTerminalPanel is focused, because TerminalEventDispatcher added in focusGained and removed in focusLost
-          processKeyEvent(e);
-        }
-        dispatchEvent(e);
+        // Workaround for https://youtrack.jetbrains.com/issue/IDEA-214830
+        // Once it's fixed, replace "processKeyEvent(e)" with "dispatchEvent(e)".
+        JBTerminalPanel.this.processKeyEvent(e);
         return true;
       }
       return false;

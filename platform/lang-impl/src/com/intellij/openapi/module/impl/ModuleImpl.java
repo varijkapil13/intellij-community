@@ -49,7 +49,7 @@ public class ModuleImpl extends ComponentManagerImpl implements ModuleEx {
   private static final Logger LOG = Logger.getInstance(ModuleImpl.class);
 
   @NotNull private final Project myProject;
-  @Nullable private final VirtualFilePointer myImlFilePointer;
+  @Nullable protected VirtualFilePointer myImlFilePointer;
   private volatile boolean isModuleAdded;
 
   private String myName;
@@ -57,32 +57,37 @@ public class ModuleImpl extends ComponentManagerImpl implements ModuleEx {
   private final ModuleScopeProvider myModuleScopeProvider;
 
   @ApiStatus.Internal
-  public ModuleImpl(@NotNull String name, @NotNull Project project, @Nullable String filePath) {
+  public ModuleImpl(@NotNull String name, @NotNull Project project, @NotNull String filePath) {
+    this(name, project);
+    myImlFilePointer = VirtualFilePointerManager.getInstance().create(
+      VfsUtilCore.pathToUrl(filePath), this,
+      new VirtualFilePointerListener() {
+        @Override
+        public void validityChanged(@NotNull VirtualFilePointer @NotNull [] pointers) {
+          if (myImlFilePointer == null) return;
+          VirtualFile virtualFile = myImlFilePointer.getFile();
+          if (virtualFile != null) {
+            ((ModuleStore)getStore()).setPath(virtualFile.toNioPath(), virtualFile, false);
+            ModuleManager.getInstance(myProject).incModificationCount();
+          }
+        }
+      });
+  }
+
+  @ApiStatus.Internal
+  public ModuleImpl(@NotNull String name, @NotNull Project project, @Nullable VirtualFilePointer virtualFilePointer) {
+    this(name, project);
+    VirtualFilePointerManager.getInstance();
+    myImlFilePointer = virtualFilePointer;
+  }
+
+  @ApiStatus.Internal
+  public ModuleImpl(@NotNull String name, @NotNull Project project) {
     super((ComponentManagerImpl)project);
-
     registerServiceInstance(Module.class, this, ComponentManagerImpl.getFakeCorePluginDescriptor());
-
     myProject = project;
     myModuleScopeProvider = new ModuleScopeProviderImpl(this);
-
     myName = name;
-    if (filePath == null) {
-      myImlFilePointer = null;
-    }
-    else {
-      myImlFilePointer = VirtualFilePointerManager.getInstance().create(
-        VfsUtilCore.pathToUrl(filePath), this,
-        new VirtualFilePointerListener() {
-          @Override
-          public void validityChanged(@NotNull VirtualFilePointer @NotNull [] pointers) {
-            VirtualFile virtualFile = myImlFilePointer.getFile();
-            if (virtualFile != null) {
-              ((ModuleStore)getStore()).setPath(virtualFile.toNioPath(), virtualFile, false);
-              ModuleManager.getInstance(myProject).incModificationCount();
-            }
-          }
-        });
-    }
   }
 
   @Override
@@ -111,7 +116,7 @@ public class ModuleImpl extends ComponentManagerImpl implements ModuleEx {
   @Override
   protected void setProgressDuringInit(@NotNull ProgressIndicator indicator) {
     // Component loading progress is not reported for module, because at this stage minimal reporting unit it is the module itself.
-    // Stage "Loading modules" — progress reported for each loaded module and module component count doesn't matter.
+    // Stage "Loading modules" progress reported for each loaded module and module component count doesn't matter.
   }
 
   @Override

@@ -17,6 +17,7 @@ package com.jetbrains.python.codeInsight.liveTemplates;
 
 import com.intellij.codeInsight.template.EverywhereContextType;
 import com.intellij.codeInsight.template.TemplateContextType;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.patterns.PsiElementPattern;
 import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
@@ -24,11 +25,12 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ProcessingContext;
+import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.PythonLanguage;
-import com.jetbrains.python.psi.PyClass;
-import com.jetbrains.python.psi.PyParameterList;
-import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
+import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
+import com.jetbrains.python.psi.*;
 import org.jetbrains.annotations.NotNull;
 
 import static com.intellij.patterns.PlatformPatterns.psiElement;
@@ -39,7 +41,7 @@ import static com.intellij.patterns.PlatformPatterns.psiElement;
 public abstract class PythonTemplateContextType extends TemplateContextType {
 
   public PythonTemplateContextType(@NotNull String id,
-                                   @NotNull String presentableName,
+                                   @NotNull @NlsContexts.Label String presentableName,
                                    @NotNull java.lang.Class<? extends TemplateContextType> baseContextType) {
     super(id, presentableName, baseContextType);
   }
@@ -84,7 +86,7 @@ public abstract class PythonTemplateContextType extends TemplateContextType {
   public static class General extends PythonTemplateContextType {
 
     public General() {
-      super("Python", "Python", EverywhereContextType.class);
+      super("Python", "Python", EverywhereContextType.class); //NON-NLS
     }
 
     @Override
@@ -96,12 +98,26 @@ public abstract class PythonTemplateContextType extends TemplateContextType {
   public static class Class extends PythonTemplateContextType {
 
     public Class() {
-      super("Python_Class", "Class", General.class);
+      super("Python_Class", PyBundle.message("live.template.context.class"), General.class);
     }
 
     @Override
     protected boolean isInContext(@NotNull PsiElement element) {
       return PsiTreeUtil.getParentOfType(element, PyClass.class) != null;
+    }
+  }
+
+  public static class TopLevel extends PythonTemplateContextType {
+    public TopLevel() {
+      super("Python_Top_Level", PyBundle.message("live.template.context.top.level"), General.class);
+    }
+
+    @Override
+    protected boolean isInContext(@NotNull PsiElement element) {
+      ScopeOwner owner = ScopeUtil.getScopeOwner(element);
+      if (!(owner instanceof PyFile)) return false;
+      PyExpressionStatement statement = PsiTreeUtil.getParentOfType(element, PyExpressionStatement.class);
+      return statement != null && statement.getParent() instanceof PyFile;
     }
   }
 }

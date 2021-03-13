@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij;
 
 import com.intellij.openapi.diagnostic.Logger;
@@ -6,27 +6,26 @@ import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.util.ReflectionUtil;
 import com.intellij.util.text.OrdinalFormat;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import java.lang.reflect.Field;
 import java.text.MessageFormat;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.MissingResourceException;
 import java.util.ResourceBundle;
 
-/**
- * @author yole
- */
+@ApiStatus.NonExtendable
+@ApiStatus.Internal
 public abstract class BundleBase {
   public static final char MNEMONIC = 0x1B;
-  public static final String MNEMONIC_STRING = Character.toString(MNEMONIC);
-  static final String L10N_MARKER = "🔅";
+  public static final @NlsSafe String MNEMONIC_STRING = Character.toString(MNEMONIC);
   public static final boolean SHOW_LOCALIZED_MESSAGES = Boolean.getBoolean("idea.l10n");
   public static final boolean SHOW_DEFAULT_MESSAGES = Boolean.getBoolean("idea.l10n.english");
   public static final boolean SHOW_KEYS = Boolean.getBoolean("idea.l10n.keys");
+
+  static final String L10N_MARKER = "🔅";
+
   private static final Logger LOG = Logger.getInstance(BundleBase.class);
 
   private static boolean assertOnMissedKeys;
@@ -41,7 +40,7 @@ public abstract class BundleBase {
    * {@code {0}..{params.length-1}} will be substituted using passed params array. The remaining parameters
    * will be renumbered: {@code {params.length}} will become {@code {0}} and so on, so the resulting template
    * could be applied once more.
-   * 
+   *
    * @param bundle resource bundle to find the message in
    * @param key resource key
    * @param unassignedParams number of unassigned parameters
@@ -53,10 +52,9 @@ public abstract class BundleBase {
                                            int unassignedParams,
                                            Object @NotNull ... params) {
     if (unassignedParams <= 0) throw new IllegalArgumentException();
-    Object[] newParams = new Object[params.length + unassignedParams];
-    System.arraycopy(params, 0, newParams, 0, params.length);
-    final String prefix = "#$$$TemplateParameter$$$#";
-    final String suffix = "#$$$/TemplateParameter$$$#";
+    Object[] newParams = Arrays.copyOf(params, params.length + unassignedParams);
+    @NonNls String prefix = "#$$$TemplateParameter$$$#";
+    @NonNls String suffix = "#$$$/TemplateParameter$$$#";
     for (int i = 0; i < unassignedParams; i++) {
       newParams[i + params.length] = prefix + i + suffix;
     }
@@ -86,19 +84,18 @@ public abstract class BundleBase {
     return sb.toString();
   }
 
-  @NotNull
-  public static @Nls String message(@NotNull ResourceBundle bundle, @NotNull String key, Object @NotNull ... params) {
+  public static @Nls @NotNull String message(@NotNull ResourceBundle bundle, @NotNull String key, Object @NotNull ... params) {
     return messageOrDefault(bundle, key, null, params);
   }
 
   public static @Nls String messageOrDefault(@Nullable ResourceBundle bundle,
                                              @NotNull String key,
-                                             @Nullable String defaultValue,
+                                             @Nullable @Nls String defaultValue,
                                              Object @NotNull ... params) {
     if (bundle == null) return defaultValue;
 
     boolean resourceFound = true;
-    
+
     String value;
     try {
       value = bundle.getString(key);
@@ -129,8 +126,8 @@ public abstract class BundleBase {
     return result;
   }
 
-  @NotNull
-  public static String getDefaultMessage(@NotNull ResourceBundle bundle, @NotNull String key) {
+  @SuppressWarnings("HardCodedStringLiteral")
+  public static @NotNull String getDefaultMessage(@NotNull ResourceBundle bundle, @NotNull String key) {
     try {
       Field parent = ReflectionUtil.getDeclaredField(ResourceBundle.class, "parent");
       if (parent != null) {
@@ -141,23 +138,23 @@ public abstract class BundleBase {
       }
     }
     catch (IllegalAccessException e) {
-      LOG.warn("Cannot fetch default message with -Didea.l10n.english enabled, by key '" + key + "'");
+      LOG.warn("Cannot fetch default message with 'idea.l10n.english' enabled, by key '" + key + "'");
     }
+
     return "undefined";
   }
 
   private static final String[] SUFFIXES = {"</body></html>", "</html>"};
 
-  @NotNull
-  protected static @NlsSafe String appendLocalizationSuffix(@NotNull String result, @NotNull String suffixToAppend) {
+  protected static @NlsSafe @NotNull String appendLocalizationSuffix(@NotNull String result, @NotNull String suffixToAppend) {
     for (String suffix : SUFFIXES) {
       if (result.endsWith(suffix)) return result.substring(0, result.length() - suffix.length()) + L10N_MARKER + suffix;
     }
     return result + suffixToAppend;
   }
 
-  @NotNull
-  static String useDefaultValue(@Nullable ResourceBundle bundle, @NotNull String key, @Nullable String defaultValue) {
+  @SuppressWarnings("HardCodedStringLiteral")
+  static @Nls @NotNull String useDefaultValue(@Nullable ResourceBundle bundle, @NotNull String key, @Nullable @Nls String defaultValue) {
     if (defaultValue != null) {
       return defaultValue;
     }
@@ -165,11 +162,12 @@ public abstract class BundleBase {
     if (assertOnMissedKeys) {
       LOG.error("'" + key + "' is not found in " + bundle);
     }
+
     return "!" + key + "!";
   }
 
-  @NotNull
-  static @Nls String postprocessValue(@NotNull ResourceBundle bundle, @NotNull String value, Object @NotNull ... params) {
+  @SuppressWarnings("HardCodedStringLiteral")
+  static @Nls @NotNull String postprocessValue(@NotNull ResourceBundle bundle, @NotNull @Nls String value, Object @NotNull ... params) {
     value = replaceMnemonicAmpersand(value);
 
     if (params.length > 0 && value.indexOf('{') >= 0) {
@@ -187,14 +185,14 @@ public abstract class BundleBase {
     return value;
   }
 
-  @NotNull
-  public static String format(@NotNull String value, Object @NotNull ... params) {
+  @Contract(pure = true)
+  public static @NotNull String format(@NotNull String value, Object @NotNull ... params) {
     return params.length > 0 && value.indexOf('{') >= 0 ? MessageFormat.format(value, params) : value;
   }
 
   @Contract("null -> null; !null -> !null")
   public static @Nls String replaceMnemonicAmpersand(@Nullable @Nls String value) {
-    if (value == null || value.indexOf('&') < 0) {
+    if (value == null || value.indexOf('&') < 0 || value.indexOf(MNEMONIC) >= 0) {
       return value;
     }
 
@@ -228,6 +226,7 @@ public abstract class BundleBase {
       }
       i++;
     }
-    return builder.toString();
+    @NlsSafe String result = builder.toString();
+    return result;
   }
 }
