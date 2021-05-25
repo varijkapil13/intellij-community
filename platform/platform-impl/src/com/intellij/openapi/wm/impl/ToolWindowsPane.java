@@ -12,6 +12,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.registry.ExperimentalUI;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.openapi.util.registry.RegistryValueListener;
@@ -200,7 +201,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
   }
 
   private static boolean isSquareStripeUI() {
-    return Registry.is("ide.new.stripes.ui");
+    return ExperimentalUI.isNewToolWindowsStripes();
   }
 
   @Override
@@ -293,7 +294,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
   }
 
   private void setComponent(@Nullable JComponent component, @NotNull ToolWindowAnchor anchor, float weight) {
-    Dimension size = getSize();
+    Dimension size = getRootPane().getSize();
     if (ToolWindowAnchor.TOP == anchor) {
       verticalSplitter.setFirstComponent(component);
       verticalSplitter.setFirstSize((int)(size.getHeight() * weight));
@@ -583,7 +584,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
       stripe.reset();
     }
 
-    if (Registry.is("ide.new.stripes.ui")) {
+    if (ExperimentalUI.isNewToolWindowsStripes()) {
       if (myLeftToolbar != null) myLeftToolbar.reset();
       if (myRightToolbar != null) myRightToolbar.reset();
     }
@@ -597,7 +598,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
     if (!isSquareStripeUI()) return;
     if (myLeftToolbar == null || myRightToolbar == null) return;
 
-    if (!toolWindow.isAvailable() || toolWindow.getIcon() == null) return;
+    if (!toolWindow.isAvailable()) return;
     toolWindow.setOrderOnLargeStripe(-1);
 
     ToolWindowAnchor anchor = toolWindow.getLargeStripeAnchor();
@@ -623,7 +624,7 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
 
     windowInfo.setLargeStripeAnchor(anchor);
 
-    if (!toolWindow.isAvailable() || toolWindow.getIcon() == null || !toolWindow.isVisibleOnLargeStripe()) return;
+    if (!toolWindow.isAvailable() || !toolWindow.isVisibleOnLargeStripe()) return;
 
     if (ToolWindowAnchor.LEFT.equals(anchor) || ToolWindowAnchor.BOTTOM.equals(anchor)) {
       myLeftToolbar.addStripeButton(project, anchor, toolWindow);
@@ -1048,9 +1049,13 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
         }
 
         WindowInfo info = (((InternalDecoratorImpl)component)).getToolWindow().getWindowInfo();
+        int rootWidth = getRootPane().getWidth();
+        int rootHeight = getRootPane().getHeight();
+        
+
         float weight = info.getAnchor().isHorizontal()
-                       ? (float)component.getHeight() / getHeight()
-                       : (float)component.getWidth() / getWidth();
+                       ? ToolWindowManagerImpl.Companion.getAdjustedRatio(component.getHeight(), rootHeight, 1)
+                       : ToolWindowManagerImpl.Companion.getAdjustedRatio(component.getWidth(),  rootWidth, 1);
         setBoundsInPaletteLayer(component, info.getAnchor(), weight);
       }
     }
@@ -1062,18 +1067,21 @@ public final class ToolWindowsPane extends JBLayeredPane implements UISettingsLi
       else if (weight > 1.0f) {
         weight = 1.0f;
       }
+      int rootHeight = getRootPane().getHeight();
+      int rootWidth = getRootPane().getWidth();
+      
       if (ToolWindowAnchor.TOP == anchor) {
-        component.setBounds(0, 0, getWidth(), (int)(getHeight() * weight + .5f));
+        component.setBounds(0, 0, getWidth(), (int)(rootHeight * weight));
       }
       else if (ToolWindowAnchor.LEFT == anchor) {
-        component.setBounds(0, 0, (int)(getWidth() * weight + .5f), getHeight());
+        component.setBounds(0, 0, (int)(rootWidth * weight), getHeight());
       }
       else if (ToolWindowAnchor.BOTTOM == anchor) {
-        final int height = (int)(getHeight() * weight + .5f);
+        final int height = (int)(rootHeight * weight);
         component.setBounds(0, getHeight() - height, getWidth(), height);
       }
       else if (ToolWindowAnchor.RIGHT == anchor) {
-        final int width = (int)(getWidth() * weight + .5f);
+        final int width = (int)(rootWidth * weight);
         component.setBounds(getWidth() - width, 0, width, getHeight());
       }
       else {

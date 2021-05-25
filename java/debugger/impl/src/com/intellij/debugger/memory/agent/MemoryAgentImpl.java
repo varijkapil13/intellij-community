@@ -27,7 +27,6 @@ class MemoryAgentImpl implements MemoryAgent {
     RUNNING, FINISHED, CANCELLED
   }
 
-
   private static final Logger LOG = Logger.getInstance(MemoryAgentImpl.class);
 
   static final MemoryAgent DISABLED = new MemoryAgentImpl();
@@ -221,7 +220,6 @@ class MemoryAgentImpl implements MemoryAgent {
       }
 
       myProgressCheckingFuture = null;
-      myProgressIndicator = null;
     }
 
     @SuppressWarnings("HardCodedStringLiteral")
@@ -237,8 +235,10 @@ class MemoryAgentImpl implements MemoryAgent {
       }
 
       ApplicationManager.getApplication().invokeLater(() -> {
-        myProgressIndicator.setText(progressPoint.getMessage());
-        myProgressIndicator.setFraction(progressPoint.getFraction());
+        if (myProgressIndicator != null) {
+          myProgressIndicator.setText(progressPoint.getMessage());
+          myProgressIndicator.setFraction(progressPoint.getFraction());
+        }
       });
 
       if (progressPoint.isFinished()) {

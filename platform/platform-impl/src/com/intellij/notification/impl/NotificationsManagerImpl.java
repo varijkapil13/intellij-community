@@ -50,6 +50,7 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.accessibility.AccessibleContext;
 import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
@@ -378,7 +379,7 @@ public final class NotificationsManagerImpl extends NotificationsManager {
       layoutData.mergeData = null;
     }
     layoutData.id = notification.id;
-    layoutData.displayId = notification.displayId;
+    layoutData.displayId = notification.getDisplayId();
     layoutDataRef.set(layoutData);
 
     if (layoutData.textColor == null) {
@@ -430,6 +431,7 @@ public final class NotificationsManagerImpl extends NotificationsManager {
 
     String textContent = NotificationsUtil.buildHtml(notification, style, true, null, fontStyle);
     text.setText(textContent);
+    setTextAccessibleName(text, textContent);
     text.setEditable(false);
     text.setOpaque(false);
 
@@ -556,7 +558,9 @@ public final class NotificationsManagerImpl extends NotificationsManager {
     if (notification.hasTitle()) {
       String titleStyle = StringUtil.defaultIfEmpty(fontStyle, "") + "white-space:nowrap;";
       JLabel title = new JLabel();
-      title.setText(NotificationsUtil.buildHtml(notification, titleStyle, false, null, null));
+      String titleContent = NotificationsUtil.buildHtml(notification, titleStyle, false, null, null);
+      title.setText(titleContent);
+      setTextAccessibleName(title, titleContent);
       title.setOpaque(false);
       title.setForeground(layoutData.textColor);
       centerPanel.addTitle(title);
@@ -656,8 +660,8 @@ public final class NotificationsManagerImpl extends NotificationsManager {
     balloon.setShadowBorderProvider(new NotificationBalloonShadowBorderProvider(layoutData.fillColor, layoutData.borderColor));
 
     if (!layoutData.welcomeScreen) {
-      balloon.setActionProvider(
-        new NotificationBalloonActionProvider(balloon, centerPanel.getTitle(), layoutData, notification.getGroupId(), notification.id, notification.displayId));
+      balloon.setActionProvider(new NotificationBalloonActionProvider(
+        balloon, centerPanel.getTitle(), layoutData, notification.getGroupId(), notification.id, notification.getDisplayId()));
     }
 
     ApplicationManager.getApplication().getMessageBus().connect(balloon).subscribe(LafManagerListener.TOPIC, source -> {
@@ -671,6 +675,11 @@ public final class NotificationsManagerImpl extends NotificationsManager {
 
     Disposer.register(parentDisposable, balloon);
     return balloon;
+  }
+
+  private static void setTextAccessibleName(@NotNull JComponent component, @NotNull String htmlContent) {
+    component.putClientProperty(AccessibleContext.ACCESSIBLE_NAME_PROPERTY,
+                                StringUtil.unescapeXmlEntities(StringUtil.stripHtml(htmlContent, " ")));
   }
 
   public static @NotNull JScrollPane createBalloonScrollPane(@NotNull Component content, boolean configure) {
@@ -690,12 +699,12 @@ public final class NotificationsManagerImpl extends NotificationsManager {
   }
 
   private static void createActionPanel(Notification notification, NotificationCenterPanel centerPanel, int gap, HoverAdapter hoverAdapter) {
-    NotificationActionPanel actionPanel = new NotificationActionPanel(gap, notification.getCollapseActionsDirection());
+    NotificationActionPanel actionPanel = new NotificationActionPanel(gap, notification.getCollapseDirection());
     centerPanel.addActionPanel(actionPanel);
 
     List<AnAction> actions = notification.getActions();
 
-    if (actions.size() > 2 && notification.getCollapseActionsDirection() == Notification.CollapseActionsDirection.KEEP_RIGHTMOST) {
+    if (actions.size() > 2 && notification.getCollapseDirection() == Notification.CollapseActionsDirection.KEEP_RIGHTMOST) {
       addDropDownAction(notification, actionPanel);
     }
 
@@ -710,7 +719,7 @@ public final class NotificationsManagerImpl extends NotificationsManager {
         }, action));
     }
 
-    if (actions.size() > 2 && notification.getCollapseActionsDirection() == Notification.CollapseActionsDirection.KEEP_LEFTMOST) {
+    if (actions.size() > 2 && notification.getCollapseDirection() == Notification.CollapseActionsDirection.KEEP_LEFTMOST) {
       addDropDownAction(notification, actionPanel);
     }
 

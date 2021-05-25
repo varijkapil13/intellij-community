@@ -19,6 +19,7 @@ public final class ClassLoaderConfigurationData {
     if (value == null) {
       SEPARATE_CLASSLOADER_FOR_SUB_ONLY = new ReferenceOpenHashSet<>(new PluginId[]{
         PluginId.getId("org.jetbrains.plugins.ruby"),
+        PluginId.getId("PythonCore"),
         PluginId.getId("com.jetbrains.rubymine.customization"),
         PluginId.getId("JavaScript"),
         PluginId.getId("Docker"),
@@ -50,7 +51,6 @@ public final class ClassLoaderConfigurationData {
       PluginId.getId("com.intellij.spring.data"),
       PluginId.getId("com.intellij.spring.boot.run.tests"),
       PluginId.getId("com.intellij.spring.boot"),
-      PluginId.getId("com.jetbrains.space"),
       PluginId.getId("com.intellij.spring"),
     });
   }

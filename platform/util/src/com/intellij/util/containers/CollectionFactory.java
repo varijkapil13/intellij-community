@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.containers;
 
 import com.intellij.openapi.util.SystemInfoRt;
@@ -16,6 +16,11 @@ public final class CollectionFactory {
   @Contract(value = " -> new", pure = true)
   public static @NotNull <K, V> ConcurrentMap<K, V> createConcurrentWeakMap() {
     return new ConcurrentWeakHashMap<>(0.75f);
+  }
+
+  @Contract(value = " -> new", pure = true)
+  public static @NotNull <V> ConcurrentMap<String, V> createConcurrentWeakCaseInsensitiveMap() {
+    return new ConcurrentWeakHashMap<>(HashingStrategy.caseInsensitive());
   }
 
   @Contract(value = " -> new", pure = true)
@@ -120,6 +125,10 @@ public final class CollectionFactory {
 
   public static <V> @NotNull Map<String, V> createCaseInsensitiveStringMap() {
     return new Object2ObjectOpenCustomHashMap<>(FastUtilHashingStrategies.getCaseInsensitiveStringStrategy());
+  }
+
+  public static <V> @NotNull Map<String, V> createCaseInsensitiveStringMap(int expectedSize) {
+    return new Object2ObjectOpenCustomHashMap<>(expectedSize, FastUtilHashingStrategies.getCaseInsensitiveStringStrategy());
   }
 
   public static <V> @NotNull Map<String, V> createCaseInsensitiveStringMap(@NotNull Map<String, V> source) {

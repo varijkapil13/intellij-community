@@ -51,6 +51,7 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.registry.ExperimentalUI;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -65,11 +66,12 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsChangeEvent;
 import com.intellij.psi.codeStyle.CodeStyleSettingsListener;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.ui.*;
+import com.intellij.ui.components.GradientViewport;
 import com.intellij.ui.components.JBLayeredPane;
 import com.intellij.ui.components.JBScrollBar;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.mac.MacGestureSupportInstaller;
-import com.intellij.ui.mac.touchbar.TouchBarsManager;
+import com.intellij.ui.mac.touchbar.TouchbarSupport;
 import com.intellij.ui.paint.PaintUtil;
 import com.intellij.ui.paint.PaintUtil.RoundingMode;
 import com.intellij.ui.scale.JBUIScale;
@@ -141,6 +143,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
   private static final boolean HONOR_CAMEL_HUMPS_ON_TRIPLE_CLICK =
     Boolean.parseBoolean(System.getProperty("idea.honor.camel.humps.on.triple.click"));
   private static final Key<BufferedImage> BUFFER = Key.create("buffer");
+  static final Key<Boolean> INITIALIZED = Key.create("editor.is.fully.initialized");
   @NotNull private final DocumentEx myDocument;
 
   private final JPanel myPanel;
@@ -310,7 +313,11 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
   private CaretImpl myPrimaryCaret;
 
   public final boolean myDisableRtl = Registry.is("editor.disable.rtl");
-  public final Object myFractionalMetricsHintValue = calcFractionalMetricsHint();
+  /**
+   * @deprecated use UISettings#getEditorFractionalMetricsHint instead
+   */
+  @Deprecated
+  public Object myFractionalMetricsHintValue = UISettings.getEditorFractionalMetricsHint();
 
   final EditorView myView;
 
@@ -532,6 +539,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
 
     myScrollingPositionKeeper = new EditorScrollingPositionKeeper(this);
     Disposer.register(myDisposable, myScrollingPositionKeeper);
+    putUserData(INITIALIZED, Boolean.TRUE);
   }
 
   public void applyFocusMode() {
@@ -985,6 +993,8 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
     if (myFocusModeModel != null) {
       myFocusModeModel.clearFocusMode();
     }
+
+    myFractionalMetricsHintValue = UISettings.getEditorFractionalMetricsHint();
   }
 
   /**
@@ -1058,7 +1068,11 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
 
     myGutterComponent.setOpaque(true);
 
-    myScrollPane.setViewportView(myEditorComponent);
+    if (ExperimentalUI.isNewEditorTabs()) {
+      myScrollPane.setViewport(new GradientViewport(myEditorComponent, JBUI.insets(10), true));
+    } else {
+      myScrollPane.setViewportView(myEditorComponent);
+    }
     //myScrollPane.setBorder(null);
     myScrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
     myScrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
@@ -1274,7 +1288,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
 
     Graphics graphics = GraphicsUtil.safelyGetGraphics(myEditorComponent);
     if (graphics != null) { // editor component is not showing
-      PaintUtil.alignTxToInt((Graphics2D)graphics, PaintUtil.insets2offset(getInsets()), true, false, RoundingMode.CEIL);
+      PaintUtil.alignTxToInt((Graphics2D)graphics, PaintUtil.insets2offset(getInsets()), true, false, RoundingMode.FLOOR);
       processKeyTypedImmediately(c, graphics, context);
       graphics.dispose();
     }
@@ -1560,7 +1574,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
     if (myDocumentChangeInProgress) {
       // at this point soft wrap model might be in an invalid state, so the following calculations cannot be performed correctly
       if (startOffset < myRangeToRepaintStart) myRangeToRepaintStart = startOffset;
-      if (endOffset < myRangeToRepaintEnd) myRangeToRepaintEnd = endOffset;
+      if (endOffset > myRangeToRepaintEnd) myRangeToRepaintEnd = endOffset;
       return;
     }
 
@@ -1709,7 +1723,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
       startLine = myDocument.getLineNumber(myRangeToRepaintStart);
     }
     if (myRangeToRepaintEnd > myDocument.getLineEndOffset(endLine)) {
-      endLine = myDocument.getLineNumber(myRangeToRepaintEnd);
+      endLine = myDocument.getLineNumber(Math.min(myRangeToRepaintEnd, myDocument.getTextLength()));
     }
     if (countLineFeeds(e.getOldFragment()) != countLineFeeds(e.getNewFragment())) {
       // Lines removed. Need to repaint till the end of the screen
@@ -1960,7 +1974,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
     myHeaderPanel.repaint();
 
     if (SystemInfo.isMac) {
-      TouchBarsManager.onUpdateEditorHeader(this, header);
+      TouchbarSupport.onUpdateEditorHeader(this);
     }
   }
 
@@ -2715,13 +2729,6 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
     myCurrentDragIsSubstantial = true;
   }
 
-  @NotNull
-  static Object calcFractionalMetricsHint() {
-    return Registry.is("editor.text.fractional.metrics")
-           ? RenderingHints.VALUE_FRACTIONALMETRICS_ON
-           : RenderingHints.VALUE_FRACTIONALMETRICS_OFF;
-  }
-
   private static class RepaintCursorCommand implements Runnable {
     private long mySleepTime = 500;
     private boolean myIsBlinkCaret = true;
@@ -2856,12 +2863,14 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
 
   @Override
   public void setOneLineMode(boolean isOneLineMode) {
+    if (isOneLineMode == myIsOneLineMode) return;
     myIsOneLineMode = isOneLineMode;
     getScrollPane().setInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT, null);
     JBScrollPane pane = ObjectUtils.tryCast(getScrollPane(), JBScrollPane.class);
     JComponent component = pane == null ? null : pane.getStatusComponent();
     if (component != null) component.setVisible(!isOneLineMode());
     reinitSettings();
+    myPropertyChangeSupport.firePropertyChange(PROP_ONE_LINE_MODE, !isOneLineMode, isOneLineMode);
   }
 
   public static final class CaretRectangle {
@@ -3819,19 +3828,12 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
       myDragStarted = false;
       clearDnDContext();
 
-      boolean forceProcessing = false;
       myMousePressedEvent = e;
 
       myExpectedCaretOffset = event.getOffset();
       try {
         for (EditorMouseListener mouseListener : myMouseListeners) {
-          boolean wasConsumed = event.isConsumed();
           mouseListener.mousePressed(event);
-          //noinspection deprecation
-          if (!wasConsumed && event.isConsumed() && mouseListener instanceof com.intellij.util.EditorPopupHandler) {
-            // compatibility with legacy code, this logic should be removed along with EditorPopupHandler
-            forceProcessing = true;
-          }
           if (isReleased) return;
         }
       }
@@ -3851,7 +3853,7 @@ public final class EditorImpl extends UserDataHolderBase implements EditorEx, Hi
         myDragOnGutterSelectionStartLine = EditorUtil.yPositionToLogicalLine(EditorImpl.this, e);
       }
 
-      if (event.isConsumed() && !forceProcessing) return;
+      if (event.isConsumed()) return;
 
       if (myCommandProcessor != null) {
         Runnable runnable = () -> {

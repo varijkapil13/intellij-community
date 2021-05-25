@@ -19,6 +19,7 @@ import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.StatusBar;
 import com.intellij.ui.ComponentUtil;
+import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBMenu;
 import com.intellij.ui.mac.foundation.NSDefaults;
 import com.intellij.ui.plaf.beg.IdeaMenuUI;
@@ -333,7 +334,7 @@ public final class ActionMenu extends JBMenu {
         clearItems();
       }
       myIsHidden = false;
-      if (ActionPlaces.MAIN_MENU.equals(myPlace)) {
+      if (SystemInfo.isMacSystemMenu && ActionPlaces.MAIN_MENU.equals(myPlace)) {
         fillMenu();
       }
     }
@@ -341,7 +342,7 @@ public final class ActionMenu extends JBMenu {
 
   @Override
   public void setPopupMenuVisible(boolean b) {
-    if (b && !ActionPlaces.MAIN_MENU.equals(myPlace)) {
+    if (b && !(SystemInfo.isMacSystemMenu && ActionPlaces.MAIN_MENU.equals(myPlace))) {
       fillMenu();
       if (!isSelected()) {
         return;
@@ -390,7 +391,8 @@ public final class ActionMenu extends JBMenu {
     }
 
     final boolean isDarkMenu = SystemInfo.isMacSystemMenu && NSDefaults.isDarkMenuBar();
-    Utils.fillMenu(myGroup.getAction(), this, myMnemonicEnabled, myPresentationFactory, context, myPlace, true, isDarkMenu);
+    Utils.fillMenu(myGroup.getAction(), this, myMnemonicEnabled, myPresentationFactory, context, myPlace, true, isDarkMenu,
+                   RelativePoint.getNorthEastOf(this));
   }
 
   private class MenuItemSynchronizer implements PropertyChangeListener {
@@ -412,7 +414,7 @@ public final class ActionMenu extends JBMenu {
       else if (Presentation.PROP_MNEMONIC_INDEX.equals(name)) {
         setDisplayedMnemonicIndex(myPresentation.getDisplayedMnemonicIndex());
       }
-      else if (Presentation.PROP_TEXT.equals(name)) {
+      else if (Presentation.PROP_TEXT_WITH_SUFFIX.equals(name)) {
         setText(myPresentation.getText(true));
       }
       else if (Presentation.PROP_ICON.equals(name) || Presentation.PROP_DISABLED_ICON.equals(name)) {

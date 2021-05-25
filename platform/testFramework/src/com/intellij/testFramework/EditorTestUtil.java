@@ -7,6 +7,7 @@ import com.intellij.ide.DataManager;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -21,7 +22,6 @@ import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
 import com.intellij.openapi.editor.impl.EditorImpl;
-import com.intellij.openapi.editor.impl.InlayModelImpl;
 import com.intellij.openapi.editor.impl.SoftWrapModelImpl;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapDrawingType;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapPainter;
@@ -32,10 +32,7 @@ import com.intellij.openapi.fileEditor.impl.CurrentEditorProvider;
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.Ref;
-import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
@@ -78,7 +75,7 @@ public final class EditorTestUtil {
     return first != 0 ? first : Comparing.compare(o1.second, o2.second);
   };
 
-  public static void performTypingAction(Editor editor, char c) {
+  public static void performTypingAction(@NotNull Editor editor, char c) {
     if (c == BACKSPACE_FAKE_CHAR) {
       executeAction(editor, IdeActions.ACTION_EDITOR_BACKSPACE);
     }
@@ -110,15 +107,12 @@ public final class EditorTestUtil {
 
   public static void executeAction(@NotNull Editor editor, boolean assertActionIsEnabled, @NotNull AnAction action) {
     AnActionEvent event = AnActionEvent.createFromAnAction(action, null, "", createEditorContext(editor));
-    action.beforeActionPerformedUpdate(event);
-    if (!event.getPresentation().isEnabled()) {
-      assertFalse("Action " + action + " is disabled", assertActionIsEnabled);
-      return;
+    if (ActionUtil.lastUpdateAndCheckDumb(action, event, false)) {
+      ActionUtil.performActionDumbAwareWithCallbacks(action, event);
     }
-    ActionManagerEx actionManager = ActionManagerEx.getInstanceEx();
-    actionManager.fireBeforeActionPerformed(action, event.getDataContext(), event);
-    action.actionPerformed(event);
-    actionManager.fireAfterActionPerformed(action, event.getDataContext(), event);
+    else if (assertActionIsEnabled) {
+      fail("Action " + action + " is disabled");
+    }
   }
 
   @NotNull
@@ -152,7 +146,7 @@ public final class EditorTestUtil {
 
   public static void checkEditorHighlighter(Project project, Editor editor) {
     if (!(editor instanceof EditorImpl)) return;
-    HighlighterIterator editorIterator = ((EditorEx)editor).getHighlighter().createIterator(0);
+    HighlighterIterator editorIterator = editor.getHighlighter().createIterator(0);
 
     EditorHighlighter freshHighlighter = EditorHighlighterFactory.getInstance().createEditorHighlighter(
       project, ((EditorEx)editor).getVirtualFile());
@@ -168,7 +162,7 @@ public final class EditorTestUtil {
         throw new IllegalStateException("Editor highlighter failed to update incrementally:\nFresh:  " +
                                         dumpHighlighter(freshHighlighter) +
                                         "\nEditor: " +
-                                        dumpHighlighter(((EditorImpl)editor).getHighlighter()));
+                                        dumpHighlighter(editor.getHighlighter()));
       }
       editorIterator.advance();
       freshIterator.advance();
@@ -449,8 +443,8 @@ public final class EditorTestUtil {
     }
     catch (AssertionError e) {
       try {
-        assertEquals(e.getMessage(), getExpectedStateAsTestTemplate(editor, caretState.carets),
-                     getActualStateAsTestTemplate(editor, caretState.carets));
+        assertEquals(e.getMessage(), CaretAndSelectionMarkup.renderExpectedState(editor, caretState.carets),
+                     CaretAndSelectionMarkup.renderActualState(editor));
       }
       catch (AssertionError exception) {
         exception.addSuppressed(e);
@@ -493,39 +487,59 @@ public final class EditorTestUtil {
     }
   }
 
-  private static String getActualStateAsTestTemplate(@NotNull Editor editor,
-                                                     @NotNull List<CaretInfo> expectedCarets) {
-    StringBuilder sb = new StringBuilder(editor.getDocument().getCharsSequence());
-    List<Caret> allCarets = new ArrayList<>(editor.getCaretModel().getAllCarets());
-    for (int i = allCarets.size() - 1; i >= 0; i--) {
-      Caret caret = allCarets.get(i);
-      CaretInfo expected = i < expectedCarets.size() ? expectedCarets.get(i) : null;
-      boolean hasSelection = caret.hasSelection();
-      if (hasSelection) sb.insert(caret.getSelectionEnd(), SELECTION_END_TAG);
-      if (expected != null && expected.position != null) sb.insert(caret.getOffset(), CARET_TAG);
-      if (hasSelection) sb.insert(caret.getSelectionStart(), SELECTION_START_TAG);
-    }
-    return sb.toString();
-  }
+  private static class CaretAndSelectionMarkup {
+    private final @NotNull ArrayList<Pair<Integer, String>> marks = new ArrayList<>();
 
-  private static String getExpectedStateAsTestTemplate(@NotNull Editor editor, @NotNull List<CaretInfo> carets) {
-    StringBuilder sb = new StringBuilder(editor.getDocument().getCharsSequence());
-    for (int i = carets.size() - 1; i >= 0; i--) {
-      CaretInfo expected = carets.get(i);
-      LogicalPosition position = expected.position;
-      TextRange selection = expected.selection;
-
-      ArrayList<Pair<Integer, String>> marks = new ArrayList<>();
-      if (selection != null) marks.add(Pair.create(selection.getEndOffset(), SELECTION_END_TAG));
-      if (position != null) marks.add(Pair.create(editor.getDocument().getLineStartOffset(position.line) + position.column, CARET_TAG));
-      if (selection != null) marks.add(Pair.create(selection.getStartOffset(), SELECTION_START_TAG));
-      marks.sort(Comparator.comparingInt((Pair<Integer, String> mark) -> mark.first).reversed());
-
-      for (Pair<Integer, String> mark : marks) {
-        sb.insert(mark.first, mark.second);
+    static @NotNull String renderActualState(@NotNull Editor editor) {
+      CaretAndSelectionMarkup markup = new CaretAndSelectionMarkup();
+      // There's no guarantee on the order the carets are enumerated,
+      // and in any case we should be prepared that something might go wrong.
+      for (Caret caret : editor.getCaretModel().getAllCarets()) {
+        boolean hasSelection = caret.hasSelection();
+        if (hasSelection) markup.addMark(caret.getSelectionStart(), SELECTION_START_TAG);
+        markup.addMark(caret.getOffset(), CARET_TAG);
+        if (hasSelection) markup.addMark(caret.getSelectionEnd(), SELECTION_END_TAG);
       }
+      return markup.insertMarks(editor.getDocument().getCharsSequence());
     }
-    return sb.toString();
+
+    static @NotNull String renderExpectedState(@NotNull Editor editor, @NotNull List<CaretInfo> carets) {
+      CaretAndSelectionMarkup markup = new CaretAndSelectionMarkup();
+      // The expected state is properly sorted already, so it doesn't require extra sorting,
+      // but for sake of consistency we use the same approach as for the actual caret state.
+      for (CaretInfo expected : carets) {
+        LogicalPosition position = expected.position;
+        TextRange selection = expected.selection;
+
+        if (selection != null) markup.addMark(selection.getStartOffset(), SELECTION_START_TAG);
+        if (position != null) markup.addMark(editor.getDocument().getLineStartOffset(position.line) + position.column, CARET_TAG);
+        if (selection != null) markup.addMark(selection.getEndOffset(), SELECTION_END_TAG);
+      }
+      return markup.insertMarks(editor.getDocument().getCharsSequence());
+    }
+
+    private void addMark(int offset, @NotNull String s) {
+      Pair<Integer, String> mark = Pair.create(offset, s);
+      marks.add(mark);
+    }
+
+    private @NotNull String insertMarks(@NotNull @NlsSafe CharSequence text) {
+      StringBuilder sb = new StringBuilder(text);
+
+      marks.sort(Comparator.comparingInt(mark -> mark.first));
+      for (int i = marks.size() - 1; i >= 0; i--) {
+        Pair<Integer, String> mark = marks.get(i);
+        int offset = mark.first;
+        if (0 <= offset && offset <= sb.length()) {
+          sb.insert(offset, mark.second);
+        }
+        else {
+          sb.insert(Math.max(0, Math.min(offset, sb.length())), "!!!" + mark.second + "@[" + offset + "]");
+        }
+      }
+
+      return sb.toString();
+    }
   }
 
   public static FoldRegion addFoldRegion(@NotNull Editor editor, final int startOffset, final int endOffset, final String placeholder, final boolean collapse) {
@@ -570,8 +584,12 @@ public final class EditorTestUtil {
                                     boolean showWhenFolded,
                                     int widthInPixels,
                                     Integer heightInPixels) {
-    return ((InlayModelImpl)editor.getInlayModel()).addBlockElement(offset, relatesToPrecedingText, showAbove, showWhenFolded, 0,
-                                                                    new EmptyInlayRenderer(widthInPixels, heightInPixels));
+    return editor.getInlayModel().addBlockElement(offset,
+                                                  new InlayProperties()
+                                                    .relatesToPrecedingText(relatesToPrecedingText)
+                                                    .showAbove(showAbove)
+                                                    .showWhenFolded(showWhenFolded),
+                                                  new EmptyInlayRenderer(widthInPixels, heightInPixels));
   }
 
   public static Inlay addAfterLineEndInlay(@NotNull Editor editor, int offset, int widthInPixels) {
@@ -645,6 +663,7 @@ public final class EditorTestUtil {
     if (addSelection) {
       result.add(Pair.create(caret.getSelectionEnd(), SELECTION_END_TAG));
     }
+    result.sort(Pair.comparingByFirst());
     return result;
   }
 

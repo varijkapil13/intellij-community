@@ -1,0 +1,15 @@
+<html>
+<body>
+Reports redundant '<code>?: return null</code>':
+<br /><br />
+<pre>
+fun foo(): Int? {
+  ...
+}
+
+fun test() : Int? {
+  return foo() ?: return null
+}
+</pre>
+</body>
+</html>

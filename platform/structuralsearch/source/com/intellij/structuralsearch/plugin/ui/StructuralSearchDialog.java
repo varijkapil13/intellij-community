@@ -16,7 +16,6 @@ import com.intellij.ide.plugins.DynamicPluginListener;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.lang.Language;
-import com.intellij.notification.NotificationGroup;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.*;
@@ -291,7 +290,10 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     if (myReplace) {
       return (template == null) ? new ReplaceConfiguration(getUserDefined(), getUserDefined()) : new ReplaceConfiguration(template);
     }
-    return (template == null) ? new SearchConfiguration(getUserDefined(), getUserDefined()) : new SearchConfiguration(template);
+    if (template == null) {
+      return new SearchConfiguration(getUserDefined(), getUserDefined());
+    }
+    return (template instanceof ReplaceConfiguration) ? new ReplaceConfiguration(template) : new SearchConfiguration(template);
   }
 
   static @Nls(capitalization = Nls.Capitalization.Sentence) String getUserDefined() {
@@ -312,7 +314,7 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
         if (myReplace) {
           setTextForEditor(text, myReplaceCriteriaEdit);
         }
-        myScopePanel.setScopesFromContext();
+        myScopePanel.setScopesFromContext(null);
         ApplicationManager.getApplication().invokeLater(() -> startTemplate());
         return;
       }
@@ -804,7 +806,8 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     final Document document = mySearchCriteriaEdit.getDocument();
     final PsiFile psiFile = PsiDocumentManager.getInstance(getProject()).getPsiFile(document);
     assert psiFile != null;
-    final TemplateBuilder builder = new StructuralSearchTemplateBuilder(psiFile).buildTemplate();
+    final TemplateBuilder builder = StructuralSearchTemplateBuilder.getInstance().buildTemplate(psiFile);
+    if (builder == null) return;
     WriteCommandAction
       .runWriteCommandAction(getProject(), SSRBundle.message("command.name.live.search.template.builder"), "Structural Search",
                              () -> builder.run(Objects.requireNonNull(mySearchCriteriaEdit.getEditor()), true));
@@ -842,7 +845,7 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
 
   public Configuration getConfiguration() {
     saveConfiguration();
-    return myConfiguration.copy();
+    return myReplace ? new ReplaceConfiguration(myConfiguration) : new SearchConfiguration(myConfiguration);
   }
 
   private void removeMatchHighlights() {
@@ -956,7 +959,7 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     if (component == null) {
       return Collections.emptyList();
     }
-    List<ValidationInfo> errors = new SmartList<>();
+    final List<ValidationInfo> errors = new SmartList<>();
     final MatchOptions matchOptions = getConfiguration().getMatchOptions();
     try {
       final Project project = getProject();
@@ -1044,10 +1047,13 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
       }
     }
     if (scripts > 0) {
-      final NotificationGroup notificationGroup = NotificationGroupManager.getInstance().getNotificationGroup(UIUtil.SSR_NOTIFICATION_GROUP_ID);
-      notificationGroup.createNotification(NotificationType.WARNING)
-        .setTitle(SSRBundle.message("import.template.script.warning.title"))
-        .setContent(SSRBundle.message("import.template.script.warning", ApplicationNamesInfo.getInstance().getFullProductName(), scripts))
+      NotificationGroupManager.getInstance()
+        .getNotificationGroup(UIUtil.SSR_NOTIFICATION_GROUP_ID)
+        .createNotification(
+          SSRBundle.message("import.template.script.warning.title"),
+          SSRBundle.message("import.template.script.warning", ApplicationNamesInfo.getInstance().getFullProductName(), scripts),
+          NotificationType.WARNING
+        )
         .notify(mySearchContext.getProject());
     }
   }
@@ -1086,6 +1092,15 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     names.add(SSRBundle.message("complete.match.variable.name"));
     myTargetComboBox.setItems(names);
     myTargetComboBox.setEnabled(names.size() > 1);
+
+    for (@NlsSafe String name : names) {
+      final MatchVariableConstraint constraint = matchOptions.getVariableConstraint(name);
+      if (constraint != null && constraint.isPartOfSearchResults()) {
+        myTargetComboBox.setSelectedItem(name);
+        return;
+      }
+    }
+    myTargetComboBox.setSelectedItem(SSRBundle.message("complete.match.variable.name"));
   }
 
   /**
@@ -1127,9 +1142,8 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     final MatchOptions matchOptions = myConfiguration.getMatchOptions();
     setSearchTargets(matchOptions);
     if (!myEditConfigOnly) {
-      myScopePanel.setScopesFromContext();
       final SearchScope scope = matchOptions.getScope();
-      if (scope != null) myScopePanel.setScope(scope);
+      myScopePanel.setScopesFromContext(scope);
     }
 
 
@@ -1219,9 +1233,7 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
   @Override
   public void dispose() {
     getProject().putUserData(STRUCTURAL_SEARCH_PREVIOUS_CONFIGURATION, myConfiguration);
-
-    if (myReplace) storeDimensions(REPLACE_DIMENSION_SERVICE_KEY, SEARCH_DIMENSION_SERVICE_KEY);
-    else storeDimensions(SEARCH_DIMENSION_SERVICE_KEY, REPLACE_DIMENSION_SERVICE_KEY);
+    storeDimensions();
 
     final PropertiesComponent properties = PropertiesComponent.getInstance();
     properties.setValue(FILTERS_VISIBLE_STATE, isFilterPanelVisible(), true);
@@ -1233,17 +1245,22 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
     super.dispose();
   }
 
-  private void storeDimensions(String key1, String key2) {
+  /**
+   * Handle own dimension service to store dimensions correctly when switching between search/replace in the same dialog
+   */
+  private void storeDimensions() {
     if (myEditConfigOnly) return; // don't store dimensions when editing structural search inspection patterns
-    // handle own dimension service to store dimensions correctly when switching between search/replace in the same dialog
-    final Dimension size = getSize();
-    final DimensionService dimensionService = DimensionService.getInstance();
+
+    final String key1 = myReplace ? REPLACE_DIMENSION_SERVICE_KEY : SEARCH_DIMENSION_SERVICE_KEY;
+    final String key2 = myReplace ? SEARCH_DIMENSION_SERVICE_KEY : REPLACE_DIMENSION_SERVICE_KEY;
     final Point location = getLocation();
     if (location.x < 0) location.x = 0;
     if (location.y < 0) location.y = 0;
+    final DimensionService dimensionService = DimensionService.getInstance();
     dimensionService.setLocation(SEARCH_DIMENSION_SERVICE_KEY, location, getProject());
+    final Dimension size = getSize();
     dimensionService.setSize(key1, size, getProject());
-    final Dimension otherSize = dimensionService.getSize(key2);
+    final Dimension otherSize = dimensionService.getSize(key2, getProject());
     if (otherSize != null && otherSize.width != size.width) {
       otherSize.width = size.width;
       dimensionService.setSize(key2, otherSize, getProject());
@@ -1293,12 +1310,13 @@ public class StructuralSearchDialog extends DialogWrapper implements DocumentLis
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
+      storeDimensions();
       myReplace = !myReplace;
       setTitle(getDefaultTitle());
       myReplacePanel.setVisible(myReplace);
       loadConfiguration(myConfiguration);
       final Dimension size =
-        DimensionService.getInstance().getSize(myReplace ? REPLACE_DIMENSION_SERVICE_KEY : SEARCH_DIMENSION_SERVICE_KEY);
+        DimensionService.getInstance().getSize(myReplace ? REPLACE_DIMENSION_SERVICE_KEY : SEARCH_DIMENSION_SERVICE_KEY, e.getProject());
       if (size != null) {
         setSize(getSize().width, size.height);
       }

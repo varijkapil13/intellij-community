@@ -15,6 +15,10 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.quickfix.QuickFixAction;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.QuickFixFactory;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.LocalQuickFixAsIntentionAdapter;
+import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemDescriptorUtil;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.java.analysis.JavaAnalysisBundle;
 import com.intellij.lang.jvm.JvmModifier;
@@ -61,8 +65,8 @@ public final class HighlightClassUtil {
     PsiElement parent = ref.getParent();
     HighlightInfo highlightInfo = null;
     if (parent instanceof PsiAnonymousClass
-             && parent.getParent() instanceof PsiNewExpression
-             && !PsiUtilCore.hasErrorElementChild(parent.getParent())) {
+        && parent.getParent() instanceof PsiNewExpression
+        && !PsiUtilCore.hasErrorElementChild(parent.getParent())) {
       PsiAnonymousClass aClass = (PsiAnonymousClass)parent;
       highlightInfo = checkClassWithAbstractMethods(aClass, ref.getTextRange());
     }
@@ -192,11 +196,13 @@ public final class HighlightClassUtil {
     if (virtualFile == null) return null;
     final boolean isTestSourceRoot = fileIndex.isInTestSourceContent(virtualFile);
     String dupFileName = null;
-    for (PsiClass dupClass : classes) {
+    PsiClass dupClass = null;
+    for (PsiClass dupClassCandidate : classes) {
       // do not use equals
-      if (dupClass != aClass) {
-        VirtualFile file = dupClass.getContainingFile().getVirtualFile();
-        if (file != null && manager.isInProject(dupClass) && fileIndex.isInTestSourceContent(file) == isTestSourceRoot) {
+      if (dupClassCandidate != aClass) {
+        VirtualFile file = dupClassCandidate.getContainingFile().getVirtualFile();
+        if (file != null && manager.isInProject(dupClassCandidate) && fileIndex.isInTestSourceContent(file) == isTestSourceRoot) {
+          dupClass = dupClassCandidate;
           dupFileName = FileUtil.toSystemDependentName(file.getPath());
           break;
         }
@@ -204,9 +210,14 @@ public final class HighlightClassUtil {
     }
     if (dupFileName == null) return null;
     String message = JavaErrorBundle.message("duplicate.class.in.other.file", dupFileName);
-    TextRange textRange = HighlightNamesUtil.getClassDeclarationTextRange(aClass);
-
-    return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(textRange).descriptionAndTooltip(message).create();
+    PsiIdentifier identifier = aClass.getNameIdentifier();
+    if (identifier == null) return null;
+    TextRange textRange = identifier.getTextRange();
+    HighlightInfo info =
+      HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(textRange).descriptionAndTooltip(message).create();
+    registerRenameFix(aClass, info);
+    QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createNavigateToDuplicateElementFix(dupClass));
+    return info;
   }
 
   static HighlightInfo checkDuplicateNestedClass(@NotNull PsiClass aClass) {
@@ -218,9 +229,10 @@ public final class HighlightClassUtil {
     if (name == null) return null;
     boolean duplicateFound = false;
     boolean checkSiblings = true;
+    PsiElement element = null;
     while (parent != null) {
       if (parent instanceof PsiFile) break;
-      PsiElement element = checkSiblings ? parent.getPrevSibling() : null;
+      element = checkSiblings ? parent.getPrevSibling() : null;
       if (element == null) {
         element = parent.getParent();
         // JLS 14.3:
@@ -245,10 +257,24 @@ public final class HighlightClassUtil {
 
     if (duplicateFound) {
       String message = JavaErrorBundle.message("duplicate.class", name);
-      TextRange textRange = HighlightNamesUtil.getClassDeclarationTextRange(aClass);
-      return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(textRange).descriptionAndTooltip(message).create();
+      PsiIdentifier identifier = aClass.getNameIdentifier();
+      if (identifier == null) return null;
+      TextRange textRange = identifier.getTextRange();
+      HighlightInfo info =
+        HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(textRange).descriptionAndTooltip(message).create();
+      registerRenameFix(aClass, info);
+      QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createNavigateToDuplicateElementFix((PsiClass)element));
+      return info;
     }
     return null;
+  }
+
+  static void registerRenameFix(@Nullable PsiElement element, @Nullable HighlightInfo info) {
+    if (info == null || element == null) return;
+    final ProblemDescriptor descriptor = ProblemDescriptorUtil.toProblemDescriptor(element.getContainingFile(), info);
+    if (descriptor == null) return;
+    final LocalQuickFix fix = QUICK_FIX_FACTORY.createRenameFix();
+    QuickFixAction.registerQuickFixAction(info, new LocalQuickFixAsIntentionAdapter(fix, descriptor));
   }
 
   static HighlightInfo checkPublicClassInRightFile(@NotNull PsiClass aClass) {
@@ -758,7 +784,7 @@ public final class HighlightClassUtil {
     String description = JavaErrorBundle.message("not.allowed.in.interface");
     HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(element).descriptionAndTooltip(description).create();
     QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createDeleteFix(element));
-    QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createConvertInterfaceContainingNotAllowedToClassFix(aClass));
+    QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createConvertInterfaceToClassFix(aClass));
     return info;
   }
 
@@ -1048,9 +1074,9 @@ public final class HighlightClassUtil {
     return null;
   }
 
-  static HighlightInfo checkExtendsProhibitedClass(@NotNull PsiClass superClass, @NotNull PsiElement elementToHighlight) {
+  static HighlightInfo checkExtendsProhibitedClass(@NotNull PsiClass superClass, @NotNull PsiClass psiClass, @NotNull PsiElement elementToHighlight) {
     String qualifiedName = superClass.getQualifiedName();
-    if (CommonClassNames.JAVA_LANG_ENUM.equals(qualifiedName) || CommonClassNames.JAVA_LANG_RECORD.equals(qualifiedName)) {
+    if (CommonClassNames.JAVA_LANG_ENUM.equals(qualifiedName) && !psiClass.isEnum() || CommonClassNames.JAVA_LANG_RECORD.equals(qualifiedName) && !psiClass.isRecord()) {
       String message = JavaErrorBundle.message("classes.extends.prohibited.super", qualifiedName);
       return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(elementToHighlight).descriptionAndTooltip(message).create();
     }
@@ -1063,7 +1089,7 @@ public final class HighlightClassUtil {
       PsiClass superClass = aClass.getSuperClass();
       PsiJavaCodeReferenceElement reference = expression.getClassOrAnonymousClassReference();
       if (superClass != null && reference != null) {
-        return checkExtendsProhibitedClass(superClass, reference);
+        return checkExtendsProhibitedClass(superClass, aClass, reference);
       }
     }
     return null;
@@ -1236,20 +1262,20 @@ public final class HighlightClassUtil {
     }
     return null;
   }
-  
+
   private static @NotNull Map<PsiJavaCodeReferenceElement, PsiClass> getPermittedClassesRefs(@NotNull PsiClass psiClass) {
     PsiReferenceList permitsList = psiClass.getPermitsList();
     if (permitsList == null) return Collections.emptyMap();
     PsiJavaCodeReferenceElement[] classRefs = permitsList.getReferenceElements();
     return ContainerUtil.map2Map(classRefs, r -> Pair.create(r, ObjectUtils.tryCast(r.resolve(), PsiClass.class)));
   }
-  
+
   private static boolean hasPermittedSubclassModifier(@NotNull PsiClass psiClass) {
     PsiModifierList modifiers = psiClass.getModifierList();
     if (modifiers == null) return false;
-    return modifiers.hasExplicitModifier(PsiModifier.SEALED) ||
-           modifiers.hasExplicitModifier(PsiModifier.NON_SEALED) ||
-           modifiers.hasExplicitModifier(PsiModifier.FINAL);
+    return modifiers.hasModifierProperty(PsiModifier.SEALED) ||
+           modifiers.hasModifierProperty(PsiModifier.NON_SEALED) ||
+           modifiers.hasModifierProperty(PsiModifier.FINAL);
   }
 
   public static HighlightInfo checkSealedSuper(PsiClass aClass) {

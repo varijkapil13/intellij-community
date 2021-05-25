@@ -20,6 +20,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.event.SelectionEvent;
@@ -859,14 +860,17 @@ public final class EditorUtil {
    */
   public static Font getEditorFont() {
     EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-    int size = UISettings.getInstance().getPresentationMode()
-               ? UISettings.getInstance().getPresentationModeFontSize() - 4 : scheme.getEditorFontSize();
-    return UIUtil.getFontWithFallback(scheme.getEditorFontName(), Font.PLAIN, size);
+    Font editorFont = scheme.getFont(EditorFontType.PLAIN);
+    if (UISettings.getInstance().getPresentationMode()) {
+      editorFont = editorFont.deriveFont(UISettings.getInstance().getPresentationModeFontSize() - 4f);
+    }
+    return UIUtil.getFontWithFallback(editorFont);
   }
 
   public static Font getEditorFont(int size) {
     EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-    return UIUtil.getFontWithFallback(scheme.getEditorFontName(), Font.PLAIN, size);
+    Font font = scheme.getFont(EditorFontType.PLAIN).deriveFont((float)size);
+    return UIUtil.getFontWithFallback(font);
   }
 
   public static int getDefaultCaretWidth() {
@@ -971,7 +975,7 @@ public final class EditorUtil {
    * NOTE: if editor is an {@link EditorWindow}, corresponding offset is treated as an offset in injected editor, but returned position
    * is always related to host editor.
    *
-   * @see Inlay#isRelatedToPrecedingText()
+   * @see InlayProperties#relatesToPrecedingText(boolean)
    */
   @NotNull
   public static VisualPosition inlayAwareOffsetToVisualPosition(@NotNull Editor editor, int offset) {

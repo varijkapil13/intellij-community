@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal.statistic.eventLog
 
 import com.intellij.application.subscribe
@@ -23,6 +23,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.security.SecureRandom
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import java.util.prefs.Preferences
 
@@ -105,16 +106,16 @@ class EventLogRecorderConfiguration internal constructor(private val recorderId:
   val bucket: Int = deviceId.asBucket()
 
   private val salt: ByteArray = getOrGenerateSalt()
-  private val anonymizedCache = HashMap<String, String>()
+  private val anonymizedCache = ConcurrentHashMap<String, String>()
   private val machineIdConfigurationReference: AtomicReference<MachineIdConfiguration>
 
   val machineIdConfiguration: MachineIdConfiguration
     get() = machineIdConfigurationReference.get()
 
   init {
-    val configOptionsService = EventLogConfigOptionsService.getInstance()
-    machineIdConfigurationReference = AtomicReference(MachineIdConfiguration(configOptionsService.getMachineIdSalt(recorderId) ?: "",
-                                                                             getNonNegative(configOptionsService.getMachineIdRevision(recorderId))))
+    val configOptions = EventLogConfigOptionsService.getInstance().getOptions(recorderId)
+    machineIdConfigurationReference = AtomicReference(MachineIdConfiguration(configOptions.machineIdSalt ?: "",
+                                                                             getNonNegative(configOptions.machineIdRevision)))
 
     EventLogConfigOptionsService.TOPIC.subscribe(null, object : EventLogRecorderConfigOptionsListener(recorderId) {
       override fun onMachineIdConfigurationChanged(salt: @Nullable String?, revision: Int) {
@@ -132,13 +133,7 @@ class EventLogRecorderConfiguration internal constructor(private val recorderId:
       return data
     }
 
-    if (anonymizedCache.containsKey(data)) {
-      return anonymizedCache[data] ?: ""
-    }
-
-    val result = EventLogConfiguration.hashSha256(salt, data)
-    anonymizedCache[data] = result
-    return result
+    return anonymizedCache.computeIfAbsent(data) { EventLogConfiguration.hashSha256(salt, it) }
   }
 
   private fun getNonNegative(value: Int): Int = if (value >= 0) value else 0

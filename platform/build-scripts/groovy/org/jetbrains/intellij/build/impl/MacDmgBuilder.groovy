@@ -84,7 +84,7 @@ final class MacDmgBuilder {
       FileUtil.delete(fullPath)
       String fileName = fullPath.fileName.toString()
       sshExec("$remoteDir/signbin.sh \"$fileName\" ${macHostProperties.userName}" +
-              " ${macHostProperties.password} \"${this.macHostProperties.codesignString}\"", "signbin.log")
+              " ${macHostProperties.password} \"${this.macHostProperties.codesignString}\"", "signbin-${fileName}.log")
 
       ftpAction("get", true, null, 3) {
         ant.fileset(dir: signedFilesDir.toString()) {
@@ -139,7 +139,9 @@ final class MacDmgBuilder {
         zipfileset(dir: macAdditionalDirPath, prefix: zipRoot)
       }
     }
-    if (!buildContext.options.buildStepsToSkip.contains(BuildOptions.MAC_SIGN_STEP) || !isMac()) {
+
+    def signMacArtifacts = !buildContext.options.buildStepsToSkip.contains(BuildOptions.MAC_SIGN_STEP)
+    if (signMacArtifacts || !isMac()) {
       ftpAction("mkdir") {}
       try {
         signMacZip(sitFile, jreArchivePath, notarize)
@@ -147,7 +149,9 @@ final class MacDmgBuilder {
         if (customizer.publishArchive) {
           buildContext.notifyArtifactBuilt(sitFile.path)
         }
-        buildDmg(targetName)
+        buildContext.executeStep("Build .dmg artifact for macOS", BuildOptions.MAC_DMG_STEP) {
+          buildDmg(targetName)
+        }
       }
       finally {
         deleteRemoteDir()
@@ -158,7 +162,9 @@ final class MacDmgBuilder {
       if (customizer.publishArchive) {
         buildContext.notifyArtifactBuilt(sitFile.path)
       }
-      buildDmgLocally(sitFile, targetName)
+      buildContext.executeStep("Build .dmg artifact for macOS", BuildOptions.MAC_DMG_STEP) {
+        buildDmgLocally(sitFile, targetName)
+      }
     }
   }
 
@@ -244,7 +250,7 @@ final class MacDmgBuilder {
       }
     }
 
-    sshExec("$remoteDir/makedmg.sh ${targetFileName} ${buildContext.fullBuildNumber}", "makedmg.log")
+    sshExec("$remoteDir/makedmg.sh ${targetFileName} ${buildContext.fullBuildNumber}", "makedmg-${targetFileName}.log")
     ftpAction("get", true, null, 3) {
       ant.fileset(dir: artifactsPath) {
         include(name: "**/${targetFileName}.dmg")
@@ -308,7 +314,7 @@ final class MacDmgBuilder {
         }
       }
 
-      sshExec("$env$remoteDir/signapp.sh ${args.join(" ")}", "signapp.log")
+      sshExec("$env$remoteDir/signapp.sh ${args.join(" ")}", "signapp-${targetFile.name}.log")
 
       buildContext.messages.progress("Downloading signed ${targetFile.name} from ${macHostProperties.host}")
       ant.delete(file: targetFile.path)

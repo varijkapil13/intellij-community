@@ -6,6 +6,7 @@ import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.FileFilters
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtilRt
+import com.intellij.util.Processor
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode
 import org.jdom.Element
@@ -23,10 +24,10 @@ import java.nio.file.*
 final class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
   private final WindowsDistributionCustomizer customizer
   private final Path ideaProperties
-  private final Path patchedApplicationInfo
+  private final String patchedApplicationInfo
   private final Path icoFile
 
-  WindowsDistributionBuilder(BuildContext buildContext, WindowsDistributionCustomizer customizer, Path ideaProperties, Path patchedApplicationInfo) {
+  WindowsDistributionBuilder(BuildContext buildContext, WindowsDistributionCustomizer customizer, Path ideaProperties, String patchedApplicationInfo) {
     super(buildContext)
     this.patchedApplicationInfo = patchedApplicationInfo
     this.customizer = customizer
@@ -55,7 +56,7 @@ final class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
         }
       }
     }
-    BuildTasksImpl.unpackPty4jNative(buildContext, winDistPath, "win")
+    def pty4jNativeDir = BuildTasksImpl.unpackPty4jNative(buildContext, winDistPath, "win")
     BuildTasksImpl.generateBuildTxt(buildContext, winDistPath)
     BuildTasksImpl.copyDistFiles(buildContext, winDistPath)
 
@@ -73,10 +74,17 @@ final class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
       buildWinLauncher(architecture, winDistPath)
     }
     customizer.copyAdditionalFiles(buildContext, winDistPath.toString())
-    for (String extension : ["exe", "dll"]) {
-      distBinDir.toFile().listFiles(FileFilters.filesWithExtension(extension))?.each {
-        buildContext.signExeFile(it.absolutePath)
-      }
+    FileFilter signFileFilter = createFileFilter("exe", "dll")
+    for (Path nativeRoot : [distBinDir, pty4jNativeDir]) {
+      FileUtil.processFilesRecursively(nativeRoot.toFile(), new Processor<File>() {
+        @Override
+        boolean process(File file) {
+          if (signFileFilter.accept(file)) {
+            buildContext.signExeFile(file.absolutePath)
+          }
+          return true
+        }
+      })
     }
   }
 
@@ -263,22 +271,23 @@ final class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
    * Generates ApplicationInfo.xml file for launcher generator which contains link to proper *.ico file.
    * //todo[nik] pass path to ico file to LauncherGeneratorMain directly (probably after IDEA-196705 is fixed).
    */
-  private Path generateApplicationInfoForLauncher(@NotNull Path appInfoFile, @NotNull Path icoFilesDirectory) {
+  private Path generateApplicationInfoForLauncher(@NotNull String appInfo, @NotNull Path icoFilesDirectory) {
+    Path patchedFile = buildContext.paths.tempDir.resolve("win-launcher-application-info.xml")
     if (icoFile == null) {
-      return appInfoFile
+      Files.writeString(patchedFile, appInfo)
+      return patchedFile
     }
 
     Files.createDirectories(icoFilesDirectory)
     Files.copy(icoFile, icoFilesDirectory.resolve(icoFile.fileName), StandardCopyOption.REPLACE_EXISTING)
-    Element root = JDOMUtil.load(appInfoFile)
+    Element root = JDOMUtil.load(appInfo)
     // do not use getChild - maybe null due to namespace
     Element iconElement = (Element)root.getContent().stream()
       .filter({ it instanceof Element && ((Element)it).getName() == "icon" })
       .findFirst()
-      .orElseThrow({ new RuntimeException("`icon` element not found in $appInfoFile:\n${Files.readString(appInfoFile)}") })
+      .orElseThrow({ new RuntimeException("`icon` element not found in $appInfo:\n${appInfo}") })
 
     iconElement.setAttribute("ico", icoFile.fileName.toString())
-    Path patchedFile = buildContext.paths.tempDir.resolve("win-launcher-application-info.xml")
     JDOMUtil.write(root, patchedFile)
     return patchedFile
   }
@@ -306,6 +315,16 @@ final class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
     String javaExecutablePath = isJreIncluded ? "jbr/bin/java.exe" : null
     new ProductInfoGenerator(buildContext)
       .generateProductJson(targetDir, "bin", null, launcherPath, javaExecutablePath, vmOptionsPath, OsFamily.WINDOWS)
+  }
+
+  private static @NotNull FileFilter createFileFilter(String... extensions) {
+    List<FileFilter> filters = extensions.collect { FileFilters.filesWithExtension(it) }
+    return new FileFilter() {
+      @Override
+      boolean accept(File pathname) {
+        return filters.any { it.accept(pathname) }
+      }
+    }
   }
 }
 

@@ -482,15 +482,29 @@ public final class ProjectUtil {
    *         {@link Messages#CANCEL} (when a user cancels the dialog)
    */
   public static int confirmOpenNewProject(boolean isNewProject) {
+    return confirmOpenNewProject(isNewProject, null);
+  }
+
+  /**
+   * @param isNewProject true if the project is just created
+   * @param projectName name of the project to open (can be displayed to the user)
+   * @return {@link GeneralSettings#OPEN_PROJECT_SAME_WINDOW} or
+   *         {@link GeneralSettings#OPEN_PROJECT_NEW_WINDOW} or
+   *         {@link Messages#CANCEL} (when a user cancels the dialog)
+   */
+  public static int confirmOpenNewProject(boolean isNewProject, @Nullable String projectName) {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       return GeneralSettings.OPEN_PROJECT_NEW_WINDOW;
     }
 
     int mode = GeneralSettings.getInstance().getConfirmOpenNewProject();
     if (mode == GeneralSettings.OPEN_PROJECT_ASK) {
+      String message = projectName == null ? 
+                       IdeBundle.message("prompt.open.project.in.new.frame") :
+                       IdeBundle.message("prompt.open.project.with.name.in.new.frame", projectName);
       if (isNewProject) {
         boolean openInExistingFrame =
-          MessageDialogBuilder.yesNo(IdeBundle.message("title.new.project"), IdeBundle.message("prompt.open.project.in.new.frame"))
+          MessageDialogBuilder.yesNo(IdeBundle.message("title.new.project"), message)
             .yesText(IdeBundle.message("button.existing.frame"))
             .noText(IdeBundle.message("button.new.frame"))
             .doNotAsk(new ProjectNewWindowDoNotAskOption())
@@ -499,7 +513,7 @@ public final class ProjectUtil {
       }
       else {
         int exitCode =
-          MessageDialogBuilder.yesNoCancel(IdeBundle.message("title.open.project"), IdeBundle.message("prompt.open.project.in.new.frame"))
+          MessageDialogBuilder.yesNoCancel(IdeBundle.message("title.open.project"), message)
             .yesText(IdeBundle.message("button.existing.frame"))
             .noText(IdeBundle.message("button.new.frame"))
             .doNotAsk(new ProjectNewWindowDoNotAskOption())
@@ -607,12 +621,23 @@ public final class ProjectUtil {
       return;
     }
 
+    boolean appIsActive = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != null;
+
+    // On macOS 'toFront' restores the frame, if needed.
+    // On Linux restoring minimized frame can steal focus from active application, so we do it only if IDE is active.
+    if (SystemInfo.isWindows || SystemInfo.isXWindow && appIsActive) {
+      int state = frame.getExtendedState();
+      if ((state & Frame.ICONIFIED) != 0) {
+        frame.setExtendedState(state & ~Frame.ICONIFIED);
+      }
+    }
+
     if (stealFocusIfAppInactive) {
       AppIcon.getInstance().requestFocus((IdeFrame)frame);
     }
     else {
-      if (!SystemInfo.isXWindow || KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != null) {
-        // some Linux window managers allow 'toFront' to steal focus, so we don't call it on Linux if IDE application is not active
+      if (!SystemInfo.isXWindow || appIsActive) {
+        // some Linux window managers allow 'toFront' to steal focus, so we don't call it on Linux if IDE is not active
         frame.toFront();
       }
 
@@ -632,9 +657,14 @@ public final class ProjectUtil {
     if (lastProjectLocation != null) {
       return lastProjectLocation.replace('/', File.separatorChar);
     }
+    return getUserHomeProjectDir();
+  }
+
+  @NotNull
+  private static String getUserHomeProjectDir() {
     final String userHome = SystemProperties.getUserHome();
     String productName = ApplicationNamesInfo.getInstance().getLowercaseProductName();
-    if (PlatformUtils.isCLion() || PlatformUtils.isAppCode()) {
+    if (PlatformUtils.isCLion() || PlatformUtils.isAppCode() || PlatformUtils.isDataGrip()) {
       productName = ApplicationNamesInfo.getInstance().getProductName();
     }
     return userHome.replace('/', File.separatorChar) + File.separator + productName + "Projects";
@@ -689,7 +719,7 @@ public final class ProjectUtil {
 
   @NotNull
   @SystemDependent
-  public static String getProjectsPath() {
+  public static String getProjectsPath() { //todo: merge somehow with getBaseDir
     Application application = ApplicationManager.getApplication();
     String fromSettings = application == null || application.isHeadlessEnvironment() ? null :
                           GeneralSettings.getInstance().getDefaultProjectDirectory();
@@ -702,9 +732,15 @@ public final class ProjectUtil {
       String propertyValue = System.getProperty(propertyName);
       ourProjectsPath = propertyValue != null
                         ? PathManager.getAbsolutePath(StringUtil.unquoteString(propertyValue, '\"'))
-                        : PathManager.getConfigPath() + File.separator + PROJECTS_DIR;
+                        : getProjectsDirDefault();
     }
     return ourProjectsPath;
+  }
+
+  @NotNull
+  private static String getProjectsDirDefault() {
+    if (PlatformUtils.isDataGrip()) return getUserHomeProjectDir();
+    return PathManager.getConfigPath() + File.separator + PROJECTS_DIR;
   }
 
   public static @NotNull Path getProjectPath(@NotNull String name) {

@@ -1,7 +1,6 @@
 // Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.server;
 
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ClearableLazyValue;
 import com.intellij.openapi.util.io.FileUtil;
@@ -40,7 +39,7 @@ public class MavenDistributionsCache {
   }
 
   public static MavenDistributionsCache getInstance(Project project) {
-    return ServiceManager.getService(project, MavenDistributionsCache.class);
+    return project.getService(MavenDistributionsCache.class);
   }
 
   public void cleanCaches() {
@@ -64,10 +63,11 @@ public class MavenDistributionsCache {
   }
 
   public @NotNull String getVmOptions(@Nullable String workingDirectory) {
-    if (!useWrapper() || workingDirectory == null) {
-      return MavenWorkspaceSettingsComponent.getInstance(myProject).getSettings().importingSettings.getVmOptionsForImporter();
+    String vmOptions = MavenWorkspaceSettingsComponent.getInstance(myProject).getSettings().getImportingSettings().getVmOptionsForImporter();
+    if (workingDirectory == null || !StringUtil.isEmptyOrSpaces(vmOptions)) {
+      return vmOptions;
     }
-
+    
     String multiModuleDir = myWorkingDirToMultimoduleMap.computeIfAbsent(workingDirectory, this::resolveMultimoduleDirectory);
     return myVmSettingsMap.computeIfAbsent(multiModuleDir, this::readVmOptions);
   }
@@ -75,17 +75,17 @@ public class MavenDistributionsCache {
   private @NotNull String readVmOptions(@NotNull String multiModuleDir) {
     MavenWorkspaceSettings settings = MavenWorkspaceSettingsComponent.getInstance(myProject).getSettings();
     VirtualFile baseDir = LocalFileSystem.getInstance().findFileByPath(multiModuleDir);
-    if (baseDir == null) return settings.importingSettings.getVmOptionsForImporter();
+    if (baseDir == null) return settings.getImportingSettings().getVmOptionsForImporter();
     VirtualFile mvn = baseDir.findChild(".mvn");
-    if (mvn == null) return settings.importingSettings.getVmOptionsForImporter();
+    if (mvn == null) return settings.getImportingSettings().getVmOptionsForImporter();
     VirtualFile jdkOpts = mvn.findChild("jvm.config");
-    if (jdkOpts == null) return settings.importingSettings.getVmOptionsForImporter();
+    if (jdkOpts == null) return settings.getImportingSettings().getVmOptionsForImporter();
     try {
       return new String(jdkOpts.contentsToByteArray(true), jdkOpts.getCharset());
     }
     catch (IOException e) {
       MavenLog.LOG.warn(e);
-      return settings.importingSettings.getVmOptionsForImporter();
+      return settings.getImportingSettings().getVmOptionsForImporter();
     }
   }
 
@@ -166,7 +166,7 @@ public class MavenDistributionsCache {
                                               .map(p -> p.getDirectory())
                                               .filter(rpDirectory -> FileUtil.isAncestor(rpDirectory, workingDirectory, false))
                                               .findFirst()
-                                              .orElse(workingDirectory));
+                                              .orElse(calculateMultimoduleDirUpToFileTree(workingDirectory)));
   }
 
   private @NotNull String calculateMultimoduleDirUpToFileTree(String directory) {

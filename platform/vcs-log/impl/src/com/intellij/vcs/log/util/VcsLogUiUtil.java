@@ -8,12 +8,13 @@ import com.intellij.ide.IdeTooltip;
 import com.intellij.ide.IdeTooltipManager;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.progress.util.ProgressWindow;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsContexts;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vcs.changes.EditorTabDiffPreviewManager;
 import com.intellij.ui.*;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.navigation.History;
@@ -109,7 +110,6 @@ public final class VcsLogUiUtil {
     };
     Runnable containingBranchesListener = () -> {
       detailsPanel.branchesChanged();
-      graphTable.repaint(); // we may need to repaint highlighters
     };
     logData.getMiniDetailsGetter().addDetailsLoadedListener(miniDetailsLoadedListener);
     logData.getContainingBranchesGetter().addTaskCompletedListener(containingBranchesListener);
@@ -170,8 +170,8 @@ public final class VcsLogUiUtil {
     appendActionToEmptyText(emptyText, VcsLogBundle.message("vcs.log.reset.filters.status.action"), filterUi::clearFilters);
   }
 
-  public static boolean isDiffPreviewInEditor() {
-    return Registry.is("vcs.log.show.diff.preview.as.editor.tab");
+  public static boolean isDiffPreviewInEditor(@NotNull Project project) {
+    return EditorTabDiffPreviewManager.getInstance(project).isEditorDiffPreviewAvailable();
   }
 
   @NotNull

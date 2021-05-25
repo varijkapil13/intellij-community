@@ -216,22 +216,6 @@ public final class AboutPopup {
       myLines.add(new AboutBoxLine(IdeBundle.message("about.box.vm", vmVersion, vmVendor)));
       appendLast();
 
-      for (AboutPopupDescriptionProvider aboutInfoProvider : EP_NAME.getExtensions()) {
-        String description = aboutInfoProvider.getDescription();
-        if (description == null) continue;
-
-        String[] lines = description.split("[\n]+");
-
-        if (lines.length == 0) continue;
-
-        myLines.add(new AboutBoxLine(""));
-
-        for (String line : lines) {
-          myLines.add(new AboutBoxLine(line));
-          appendLast();
-        }
-      }
-
       myLines.add(new AboutBoxLine(""));
       myLines.add(new AboutBoxLine(""));
       myLines.add(new AboutBoxLine(IdeBundle.message("about.box.powered.by") + " ").keepWithNext());
@@ -360,9 +344,13 @@ public final class AboutPopup {
       GraphicsConfig config = new GraphicsConfig(g);
       UISettings.setupAntialiasing(g);
 
-      Font labelFont = JBFont.label();
+      Font labelFont;
       if (SystemInfo.isWindows) {
         labelFont = JBUI.Fonts.create("Segoe UI", 14);
+      } else if (SystemInfo.isMac) {
+        labelFont = JBUI.Fonts.create("Helvetica Neue", 13);
+      } else {
+        labelFont = JBUI.Fonts.create("Arial", 14);
       }
 
       int startFontSize = 14;
@@ -399,14 +387,13 @@ public final class AboutPopup {
         color = new Color((int)copyrightForeground, copyrightForeground > 0xffffff);
       }
       g2.setColor(color);
-      if (SystemInfo.isMac) {
-        g2.setFont(JBUI.Fonts.miniFont());
+      if (SystemInfo.isWindows) {
+        g.setFont(JBUI.Fonts.create("Segoe UI", 10));
+      } else if (SystemInfo.isMac) {
+        g.setFont(JBUI.Fonts.create("Helvetica Neue", 10));
+      } else {
+        g.setFont(JBUI.Fonts.create("Arial", 10));
       }
-      else {
-        g2.setFont(JBUI.Fonts.create("Segoe UI", 12));
-      }
-
-      g2.setColor(createColor(appInfo.getAboutForeground()));
 
       JBPoint copyrightCoord = getCopyrightCoord();
       g2.drawString(getCopyrightText(), copyrightCoord.x, copyrightCoord.y);
@@ -446,7 +433,7 @@ public final class AboutPopup {
     }
 
     private static JBPoint getCopyrightCoord() {
-      return new JBPoint(49, 345);
+      return new JBPoint(49, 365);
     }
 
     private static JBPoint getCopyIconCoord() {
@@ -665,6 +652,13 @@ public final class AboutPopup {
   private static @NotNull String getExtraInfo() {
     String extraInfo = SystemInfo.getOsNameAndVersion() + "\n";
 
+    for (AboutPopupDescriptionProvider aboutInfoProvider : InfoSurface.EP_NAME.getExtensions()) {
+      String description = aboutInfoProvider.getDescription();
+      if (description != null) {
+        extraInfo += description + "\n";
+      }
+    }
+
     extraInfo += "GC: " + ManagementFactory.getGarbageCollectorMXBeans().stream()
              .map(GarbageCollectorMXBean::getName).collect(StringUtil.joining()) + "\n";
 
@@ -783,7 +777,7 @@ public final class AboutPopup {
         viewer.setText(resultHtmlText);
 
         StyleSheet styleSheet = ((HTMLDocument)viewer.getDocument()).getStyleSheet();
-        styleSheet.addRule("body {font-family: \"Segoe UI\", Tahoma, sans-serif;}");
+        styleSheet.addRule("body {font-family: \"Segoe UI\", Tahoma, \"Helvetica Neue\", Helvetica, Arial, sans-serif;}");
         styleSheet.addRule("body {margin-top:0;padding-top:0;}");
         styleSheet.addRule("body {font-size:" + JBUIScale.scaleFontSize((float)14) + "pt;}");
 

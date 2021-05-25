@@ -31,21 +31,10 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import static com.intellij.openapi.application.ex.ApplicationInfoEx.WHATS_NEW_AUTO;
+import static com.intellij.openapi.application.ex.ApplicationInfoEx.WHATS_NEW_EMBED;
+
 public class WhatsNewAction extends AnAction implements DumbAware {
-  @Override
-  public void actionPerformed(@NotNull AnActionEvent e) {
-    String whatsNewUrl = ApplicationInfoEx.getInstanceEx().getWhatsNewUrl();
-    if (whatsNewUrl == null) throw new IllegalStateException();
-
-    Project project = e.getProject();
-    if (project == null || !JBCefApp.isSupported()) {
-      BrowserUtil.browse(whatsNewUrl);
-    }
-    else {
-      openWhatsNewFile(project, whatsNewUrl, null);
-    }
-  }
-
   @Override
   public void update(@NotNull AnActionEvent e) {
     boolean available = ApplicationInfoEx.getInstanceEx().getWhatsNewUrl() != null;
@@ -56,9 +45,23 @@ public class WhatsNewAction extends AnAction implements DumbAware {
     }
   }
 
+  @Override
+  public void actionPerformed(@NotNull AnActionEvent e) {
+    String whatsNewUrl = ApplicationInfoEx.getInstanceEx().getWhatsNewUrl();
+    if (whatsNewUrl == null) throw new IllegalStateException();
+
+    Project project = e.getProject();
+    if (project != null && JBCefApp.isSupported() && ApplicationInfoEx.getInstanceEx().isWhatsNewEligibleFor(WHATS_NEW_EMBED)) {
+      openWhatsNewFile(project, whatsNewUrl, null);
+    }
+    else {
+      BrowserUtil.browse(IdeUrlTrackingParametersProvider.getInstance().augmentUrl(whatsNewUrl));
+    }
+  }
+
   @ApiStatus.Internal
   public static boolean isAvailable() {
-    return Boolean.getBoolean("whats.new.notification");
+    return ApplicationInfoEx.getInstanceEx().isWhatsNewEligibleFor(WHATS_NEW_AUTO) || Boolean.getBoolean("whats.new.notification");
   }
 
   @Contract("_, null, null -> fail")
@@ -77,7 +80,8 @@ public class WhatsNewAction extends AnAction implements DumbAware {
       }
 
       UpdateChecker.getNotificationGroup()
-        .createNotification(notificationTitle, content, NotificationType.INFORMATION, NotificationListener.URL_OPENING_LISTENER)
+        .createNotification(notificationTitle, content, NotificationType.INFORMATION)
+        .setListener(NotificationListener.URL_OPENING_LISTENER)
         .notify(project);
     }
     else if (url != null) {

@@ -37,7 +37,7 @@ import java.util.function.Function;
 public class PluginClassLoader extends UrlClassLoader implements PluginAwareClassLoader {
   public static final ClassLoader[] EMPTY_CLASS_LOADER_ARRAY = new ClassLoader[0];
 
-  private static final boolean isParallelCapable = USE_PARALLEL_LOADING && registerAsParallelCapable();
+  private static final boolean isParallelCapable = registerAsParallelCapable();
 
   private static final @Nullable Writer logStream;
   private static final AtomicInteger instanceIdProducer = new AtomicInteger();
@@ -143,7 +143,7 @@ public class PluginClassLoader extends UrlClassLoader implements PluginAwareClas
                            @Nullable ResolveScopeManager resolveScopeManager,
                            @Nullable String packagePrefix,
                            @Nullable ClassPath.ResourceFileFactory resourceFileFactory) {
-    super(builder, resourceFileFactory, isParallelCapable);
+    super(builder, resourceFileFactory, isParallelCapable, !pluginDescriptor.isBundled() && !"JetBrains".equals(pluginDescriptor.getVendor()));
 
     instanceId = instanceIdProducer.incrementAndGet();
 
@@ -403,12 +403,12 @@ public class PluginClassLoader extends UrlClassLoader implements PluginAwareClas
     String canonicalPath = toCanonicalPath(name);
 
     if (canonicalPath.startsWith("/")) {
-      canonicalPath = canonicalPath.substring(1);
       //noinspection SpellCheckingInspection
       if (!canonicalPath.startsWith("/org/bridj/")) {
         String message = "Do not request resource from classloader using path with leading slash";
         Logger.getInstance(PluginClassLoader.class).error(message, new PluginException(name, pluginId));
       }
+      canonicalPath = canonicalPath.substring(1);
     }
 
     Resource resource = classPath.findResource(canonicalPath);

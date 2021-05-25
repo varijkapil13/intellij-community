@@ -43,11 +43,17 @@ final class PropertiesHelper {
     myPropertyChangeSupport.removePropertyChangeListener(name, listener);
   }
 
-  static void putType(@NotNull String name, @NotNull Class<?> type) {
+  static void setType(@NotNull String name, @NotNull Class<?> type) {
     TYPES.put(name, type);
   }
 
-  boolean isTrue(@NotNull String name) {
+  boolean is(@NotNull String name) {
     return Boolean.TRUE.equals(myProperties.get(name));
+  }
+
+  @SuppressWarnings("SameParameterValue")
+  int intValue(@NotNull String name, int defaultValue) {
+    Object value = getProperty(name);
+    return value instanceof Integer ? (int)value : defaultValue;
   }
 }

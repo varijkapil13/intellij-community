@@ -59,8 +59,8 @@ public class CountFilter extends FilterAction {
     if (myTable.getMatchVariable() == null) {
       return false;
     }
-    myMinZero = isApplicableConstraint(UIUtil.MINIMUM_ZERO, nodes, completePattern, false);
-    myMaxUnlimited = isApplicableConstraint(UIUtil.MAXIMUM_UNLIMITED, nodes, completePattern, false);
+    myMinZero = isApplicableConstraint(UIUtil.MINIMUM_ZERO, nodes, completePattern, target);
+    myMaxUnlimited = isApplicableConstraint(UIUtil.MAXIMUM_UNLIMITED, nodes, completePattern, target);
     return myMinZero || myMaxUnlimited;
   }
 

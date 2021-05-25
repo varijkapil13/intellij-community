@@ -11,11 +11,10 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.ui.LoadingDecorator;
 import com.intellij.openapi.util.Couple;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.ValueKey;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.openapi.util.text.HtmlBuilder;
-import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.VcsDataKeys;
@@ -75,7 +74,7 @@ import static com.intellij.vcs.log.VcsLogHighlighter.TextStyle.BOLD;
 import static com.intellij.vcs.log.VcsLogHighlighter.TextStyle.ITALIC;
 import static com.intellij.vcs.log.ui.table.column.VcsLogColumnUtilKt.*;
 
-public class VcsLogGraphTable extends TableWithProgress implements DataProvider, CopyProvider {
+public class VcsLogGraphTable extends TableWithProgress implements DataProvider, CopyProvider, Disposable {
   private static final Logger LOG = Logger.getInstance(VcsLogGraphTable.class);
 
   public static final int ROOT_INDICATOR_WHITE_WIDTH = 5;
@@ -112,6 +111,8 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
                           @NotNull VcsLogUiProperties uiProperties, @NotNull VcsLogColorManager colorManager,
                           @NotNull Consumer<Runnable> requestMore, @NotNull Disposable disposable) {
     super(new GraphTableModel(logData, requestMore, uiProperties));
+    Disposer.register(disposable, this);
+
     myLogData = logData;
     myId = logId;
     myProperties = uiProperties;
@@ -120,13 +121,13 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
     myBaseStyleProvider = new BaseStyleProvider(this);
 
     getEmptyText().setText(VcsLogBundle.message("vcs.log.default.status"));
-    myLogData.getProgress().addProgressIndicatorListener(new MyProgressListener(), disposable);
+    myLogData.getProgress().addProgressIndicatorListener(new MyProgressListener(), this);
 
     initColumnModel();
     onColumnOrderSettingChanged();
     setRootColumnSize();
     myGraphCommitCellRenderer = (GraphCommitCellRenderer)myTableColumns.get(Commit.INSTANCE).getCellRenderer();
-    VcsLogColumnManager.getInstance().addCurrentColumnsListener(disposable, new MyCurrentColumnsListener());
+    VcsLogColumnManager.getInstance().addCurrentColumnsListener(this, new MyCurrentColumnsListener());
 
     setShowVerticalLines(false);
     setShowHorizontalLines(false);
@@ -152,6 +153,10 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
         return VcsLogGraphTable.this.isSpeedSearchEnabled() && super.isSpeedSearchEnabled();
       }
     };
+  }
+
+  @Override
+  public void dispose() {
   }
 
   private void initColumnModel() {
@@ -455,28 +460,6 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
     setRootColumnSize();
     reLayout();
     repaint();
-  }
-
-  @Override
-  public String getToolTipText(@NotNull MouseEvent event) {
-    int row = rowAtPoint(event.getPoint());
-    VcsLogColumn<?> column = getVcsLogColumn(columnAtPoint(event.getPoint()));
-    if (column == null || row < 0) {
-      return null;
-    }
-    if (column == Root.INSTANCE) {
-      Object path = getValueAt(row, VcsLogColumnManager.getInstance().getModelIndex(column));
-      if (path instanceof FilePath) {
-        String clickMessage = isShowRootNames()
-                              ? VcsLogBundle.message("vcs.log.click.to.collapse.paths.column.tooltip")
-                              : VcsLogBundle.message("vcs.log.click.to.expand.paths.column.tooltip");
-        return new HtmlBuilder().append(HtmlChunk.text(myColorManager.getLongName((FilePath)path)).bold())
-          .br()
-          .append(clickMessage)
-          .wrapWith(HtmlChunk.html()).toString();
-      }
-    }
-    return null;
   }
 
   private boolean isShowRootNames() {
@@ -895,8 +878,8 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
     private void restoreCursor() {
       if (getCursor().getType() != Cursor.DEFAULT_CURSOR) {
         setCursor(UIUtil.cursorIfNotDefault(myLastCursor));
-        myLastCursor = null;
       }
+      myLastCursor = null;
     }
 
     @Override

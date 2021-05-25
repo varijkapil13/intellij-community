@@ -434,7 +434,12 @@ public class JBUI {
 
       @NotNull
       public static int elementIconGap() {
-        return new JBValue.UIInteger("ActionsList.icon.gap", scale(8)).get();
+        return new JBValue.UIInteger("ActionsList.icon.gap", scale(6)).get();
+      }
+
+      @NotNull
+      public static int mnemonicIconGap() {
+        return new JBValue.UIInteger("ActionsList.mnemonic.icon.gap", scale(4)).get();
       }
 
       @NotNull
@@ -650,6 +655,17 @@ public class JBUI {
       @NotNull
       public static Color underlinedTabForeground() {
         return JBColor.namedColor("EditorTabs.underlinedTabForeground", DefaultTabs.underlinedTabForeground());
+      }
+    }
+
+    public interface Notification {
+      Color FOREGROUND = JBColor.namedColor("Notification.foreground", Label.foreground());
+      Color BACKGROUND = JBColor.namedColor("Notification.background", 0xFFF8D1, 0x1D3857);
+
+      interface Error {
+        Color FOREGROUND = JBColor.namedColor("Notification.errorForeground", Notification.FOREGROUND);
+        Color BACKGROUND = JBColor.namedColor("Notification.errorBackground", 0xF5E6E7, 0x593D41);
+        Color BORDER_COLOR = JBColor.namedColor("Notification.errorBorderColor", 0xE0A8A9, 0x73454B);
       }
     }
 
@@ -1023,15 +1039,16 @@ public class JBUI {
     }
 
     public static final class Link {
+      @NotNull
       public static final Color FOCUSED_BORDER_COLOR = JBColor.namedColor("Link.focusedBorderColor", Component.FOCUSED_BORDER_COLOR);
 
       public interface Foreground {
-        Color DISABLED = JBColor.namedColor("Link.disabledForeground", Label.disabledForeground());
-        Color ENABLED = JBColor.namedColor("Link.activeForeground", JBColor.namedColor("link.foreground", 0x589DF6));
-        Color HOVERED = JBColor.namedColor("Link.hoverForeground", JBColor.namedColor("link.hover.foreground", ENABLED));
-        Color PRESSED = JBColor.namedColor("Link.pressedForeground", JBColor.namedColor("link.pressed.foreground", 0xF00000, 0xBA6F25));
-        Color VISITED = JBColor.namedColor("Link.visitedForeground", JBColor.namedColor("link.visited.foreground", 0x800080, 0x9776A9));
-        Color SECONDARY = JBColor.namedColor("Link.secondaryForeground", 0x779DBD, 0x5676A0);
+        @NotNull Color DISABLED = JBColor.namedColor("Link.disabledForeground", Label.disabledForeground());
+        @NotNull Color ENABLED = JBColor.namedColor("Link.activeForeground", JBColor.namedColor("link.foreground", 0x589DF6));
+        @NotNull Color HOVERED = JBColor.namedColor("Link.hoverForeground", JBColor.namedColor("link.hover.foreground", ENABLED));
+        @NotNull Color PRESSED = JBColor.namedColor("Link.pressedForeground", JBColor.namedColor("link.pressed.foreground", 0xF00000, 0xBA6F25));
+        @NotNull Color VISITED = JBColor.namedColor("Link.visitedForeground", JBColor.namedColor("link.visited.foreground", 0x800080, 0x9776A9));
+        @NotNull Color SECONDARY = JBColor.namedColor("Link.secondaryForeground", 0x779DBD, 0x5676A0);
       }
 
       /**
@@ -1216,10 +1233,11 @@ public class JBUI {
         private static final Color FOREGROUND = JBColor.namedColor("List.selectionForeground", Label.foreground(true));
 
         public static @NotNull Color background(boolean focused) {
-          if (focused && UIUtil.isUnderDefaultMacTheme()) {
-            double alpha = getInt("List.selectedItemAlpha", 75);
-            if (0 <= alpha && alpha < 100) return ColorUtil.mix(Color.WHITE, BACKGROUND, alpha / 100.0);
-          }
+          //todo[kb] remove?
+          //if (focused && UIUtil.isUnderDefaultMacTheme()) {
+          //  double alpha = getInt("List.selectedItemAlpha", 75);
+          //  if (0 <= alpha && alpha < 100) return ColorUtil.mix(Color.WHITE, BACKGROUND, alpha / 100.0);
+          //}
           return focused ? BACKGROUND : Inactive.BACKGROUND;
         }
 

@@ -2408,4 +2408,39 @@ class Abc {
                           "    @NotNull String\n" +
                           "}")
   }
+
+  @NeedsIndex.Full
+  void testSuperClassFieldShadowsParameter() {
+    myFixture.configureByText("Test.java", "class Test {\n" +
+                                           "  static class X {\n" +
+                                           "    int variable;\n" +
+                                           "  }\n" +
+                                           "  \n" +
+                                           "  void test(long variable) {\n" +
+                                           "    new X() {\n" +
+                                           "      double myDouble = vari<caret>\n" +
+                                           "    };\n" +
+                                           "  }\n" +
+                                           "}")
+    def lookupElements = myFixture.completeBasic()
+    assert lookupElements == null
+    myFixture.checkResult("class Test {\n" +
+                          "  static class X {\n" +
+                          "    int variable;\n" +
+                          "  }\n" +
+                          "  \n" +
+                          "  void test(long variable) {\n" +
+                          "    new X() {\n" +
+                          "      double myDouble = variable\n" +
+                          "    };\n" +
+                          "  }\n" +
+                          "}")
+  }
+
+  @NeedsIndex.Full
+  void testVariableNameByTypeName() {
+    myFixture.configureByText("Test.java", "class DemoEntity {} class Test {DemoEntity <caret>}")
+    myFixture.completeBasic()
+    assert myFixture.getLookupElementStrings() == ["demoEntity", "demo", "entity"]
+  }
 }

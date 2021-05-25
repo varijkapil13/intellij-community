@@ -36,7 +36,7 @@ import com.intellij.openapi.wm.impl.IdeGlassPaneImpl;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
-import com.intellij.ui.mac.touchbar.TouchBarsManager;
+import com.intellij.ui.mac.touchbar.TouchbarSupport;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.ui.speedSearch.ListWithFilter;
 import com.intellij.ui.speedSearch.SpeedSearch;
@@ -48,6 +48,7 @@ import com.intellij.util.ui.accessibility.AccessibleContextUtil;
 import org.jetbrains.annotations.*;
 
 import javax.swing.*;
+import javax.swing.plaf.basic.BasicHTML;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
@@ -385,7 +386,7 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
   }
 
   @Override
-  public void setAdText(@NotNull String s, int alignment) {
+  public void setAdText(@NotNull @NlsContexts.PopupAdvertisement String s, int alignment) {
     JLabel label;
     if (myAdComponent == null || !(myAdComponent instanceof JLabel)) {
       label = HintUtil.createAdComponent(s, JBUI.CurrentTheme.Advertiser.border(), alignment);
@@ -394,27 +395,18 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
       label = (JLabel)myAdComponent;
     }
 
+    Dimension prefSize = label.isVisible() ? myAdComponent.getPreferredSize() : JBUI.emptySize();
+    boolean keepSize = BasicHTML.isHTMLString(s);
+
     label.setVisible(StringUtil.isNotEmpty(s));
-    label.setText(wrapToSize(s));
+    label.setText(keepSize ? s : wrapToSize(s));
     label.setHorizontalAlignment(alignment);
-  }
 
-  protected void setFooterComponent(JComponent c) {
-    if (myAdComponent != null) {
-      myContent.remove(myAdComponent);
-    }
-
-    myContent.add(c, BorderLayout.SOUTH);
-    pack(false, true);
-    myAdComponent = c;
-
-    Dimension prefSize = myAdComponent.isVisible() ? myAdComponent.getPreferredSize() : JBUI.emptySize();
-
-    Dimension newPrefSize = myAdComponent.isVisible() ? myAdComponent.getPreferredSize() : JBUI.emptySize();
+    Dimension newPrefSize = label.isVisible() ? myAdComponent.getPreferredSize() : JBUI.emptySize();
     int delta = newPrefSize.height - prefSize.height;
 
     // Resize popup to match new advertiser size.
-    if (myPopup != null && !isBusy() && delta != 0) {
+    if (myPopup != null && !isBusy() && delta != 0 && !keepSize) {
       Window popupWindow = getContentWindow(myContent);
       if (popupWindow != null) {
         Dimension size = popupWindow.getSize();
@@ -426,12 +418,28 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
     }
   }
 
+  protected void setFooterComponent(JComponent c) {
+    if (myAdComponent != null) {
+      myContent.remove(myAdComponent);
+    }
+
+    myContent.add(c, BorderLayout.SOUTH);
+    pack(false, true);
+    myAdComponent = c;
+  }
+
   @NotNull
   @Nls
   private String wrapToSize(@NotNull @Nls String hint) {
     if (StringUtil.isEmpty(hint)) return hint;
 
-    Dimension size = myContent.computePreferredSize();
+    Dimension size = myContent.getSize();
+    if (size.width == 0 && size.height == 0)
+      size = myContent.computePreferredSize();
+
+    JBInsets.removeFrom(size, myContent.getInsets());
+    JBInsets.removeFrom(size, myAdComponent.getInsets());
+
     int width = Math.max(JBUI.CurrentTheme.Popup.minimumHintWidth(), size.width);
     return HtmlChunk.text(hint).wrapWith(HtmlChunk.div().attr("width", width)).wrapWith(HtmlChunk.html()).toString();
   }
@@ -603,15 +611,16 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
   }
 
   private @NotNull RelativePoint getBestPositionFor(@NotNull Editor editor) {
-    DataContext context = ((EditorEx)editor).getDataContext();
-    Rectangle dominantArea = PlatformDataKeys.DOMINANT_HINT_AREA_RECTANGLE.getData(context);
-    if (dominantArea != null && !myRequestFocus) {
-      final JLayeredPane layeredPane = editor.getContentComponent().getRootPane().getLayeredPane();
-      return relativePointWithDominantRectangle(layeredPane, dominantArea);
+    if (editor instanceof EditorEx) {
+      DataContext context = ((EditorEx)editor).getDataContext();
+      Rectangle dominantArea = PlatformDataKeys.DOMINANT_HINT_AREA_RECTANGLE.getData(context);
+      if (dominantArea != null && !myRequestFocus) {
+        final JLayeredPane layeredPane = editor.getContentComponent().getRootPane().getLayeredPane();
+        return relativePointWithDominantRectangle(layeredPane, dominantArea);
+      }
     }
-    else {
-      return guessBestPopupLocation(editor);
-    }
+
+    return guessBestPopupLocation(editor);
   }
 
   private @NotNull RelativePoint guessBestPopupLocation(@NotNull Editor editor) {
@@ -650,16 +659,6 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
       return originalLocation;
     }
     return new Point(preferredBounds.x, adjustedY);
-  }
-
-  /**
-   * @see #addListener
-   * @deprecated use public API instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  protected void addPopupListener(@NotNull JBPopupListener listener) {
-    myListeners.add(listener);
   }
 
   private @NotNull RelativePoint relativePointWithDominantRectangle(@NotNull JLayeredPane layeredPane, @NotNull Rectangle bounds) {
@@ -1090,9 +1089,7 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
     }
     setMinimumSize(myMinSize);
 
-    final Disposable tb = TouchBarsManager.showPopupBar(this, myContent);
-    if (tb != null)
-      Disposer.register(this, tb);
+    TouchbarSupport.showPopupItems(this, myContent);
 
     myPopup.show();
     Rectangle bounds = window.getBounds();
@@ -1500,19 +1497,14 @@ public class AbstractPopup implements JBPopup, ScreenAreaConsumer {
     myMouseOutCanceller = null;
 
     if (myFinalRunnable != null) {
-      final ActionCallback typeAheadDone = new ActionCallback();
-      IdeFocusManager.getInstance(myProject).typeAheadUntil(typeAheadDone, "Abstract Popup Disposal");
-
       ModalityState modalityState = ModalityState.current();
       Runnable finalRunnable = myFinalRunnable;
 
       getFocusManager().doWhenFocusSettlesDown(() -> {
 
         if (ModalityState.current().equals(modalityState)) {
-          typeAheadDone.setDone();
           ((TransactionGuardImpl)TransactionGuard.getInstance()).performUserActivity(finalRunnable);
         } else {
-          typeAheadDone.setRejected();
           LOG.debug("Final runnable of popup is skipped");
         }
         // Otherwise the UI has changed unexpectedly and the action is likely not applicable.

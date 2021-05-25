@@ -30,14 +30,13 @@ import java.util.function.Predicate;
  * Should be constructed using {@link #build()} method.
  */
 public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataConsumer {
-  protected static final boolean USE_PARALLEL_LOADING = Boolean.parseBoolean(System.getProperty("use.parallel.class.loading", "true"));
-  private static final boolean isParallelCapable = USE_PARALLEL_LOADING && registerAsParallelCapable();
+  private static final boolean isParallelCapable = registerAsParallelCapable();
 
   private static final ThreadLocal<Boolean> skipFindingResource = new ThreadLocal<>();
 
   private final List<Path> files;
   protected final ClassPath classPath;
-  private final ClassLoadingLocks classLoadingLocks;
+  private final ClassLoadingLocks<String> classLoadingLocks;
   private final boolean isBootstrapResourcesAllowed;
 
   /**
@@ -143,8 +142,15 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
   }
 
   protected UrlClassLoader(@NotNull UrlClassLoader.Builder builder,
+                             @Nullable ClassPath.ResourceFileFactory resourceFileFactory,
+                             boolean isParallelCapable) {
+    this(builder, resourceFileFactory, isParallelCapable, false);
+  }
+
+  protected UrlClassLoader(@NotNull UrlClassLoader.Builder builder,
                            @Nullable ClassPath.ResourceFileFactory resourceFileFactory,
-                           boolean isParallelCapable) {
+                           boolean isParallelCapable,
+                           boolean isMimicJarUrlConnectionNeeded) {
     super(builder.parent);
 
     files = builder.files;
@@ -154,10 +160,10 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
       urlsWithProtectionDomain = Collections.emptySet();
     }
 
-    classPath = new ClassPath(files, urlsWithProtectionDomain, builder, resourceFileFactory, this);
+    classPath = new ClassPath(files, urlsWithProtectionDomain, builder, resourceFileFactory, this, isMimicJarUrlConnectionNeeded);
 
     isBootstrapResourcesAllowed = builder.isBootstrapResourcesAllowed;
-    classLoadingLocks = isParallelCapable ? new ClassLoadingLocks() : null;
+    classLoadingLocks = isParallelCapable ? new ClassLoadingLocks<>() : null;
   }
 
   /** @deprecated adding URLs to a classloader at runtime could lead to hard-to-debug errors */
@@ -533,12 +539,11 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     private static final boolean isClassPathIndexEnabledGlobalValue = Boolean.parseBoolean(System.getProperty("idea.classpath.index.enabled", "true"));
 
     List<Path> files = Collections.emptyList();
-    Set<Path> pathsWithProtectionDomain;
+    @Nullable Set<Path> pathsWithProtectionDomain;
     ClassLoader parent;
     boolean lockJars = true;
     boolean useCache;
     boolean isClassPathIndexEnabled;
-    boolean preloadJarContents = true;
     boolean isBootstrapResourcesAllowed;
     boolean errorOnMissingJar = true;
     @Nullable CachePoolImpl cachePool;
@@ -629,7 +634,6 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     }
 
     public @NotNull UrlClassLoader.Builder noPreload() {
-      preloadJarContents = false;
       return this;
     }
 
@@ -648,9 +652,12 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     }
 
     public @NotNull UrlClassLoader.Builder autoAssignUrlsWithProtectionDomain() {
-      Set<Path> result = new HashSet<>();
+      Set<Path> result = null;
       for (Path path : files) {
         if (isUrlNeedsProtectionDomain(path)) {
+          if (result == null) {
+            result = new HashSet<>();
+          }
           result.add(path);
         }
       }

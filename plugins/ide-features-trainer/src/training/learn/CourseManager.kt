@@ -19,7 +19,7 @@ import training.util.WeakReferenceDelegator
 import training.util.courseCanBeUsed
 import training.util.switchOnExperimentalLessons
 
-class CourseManager internal constructor() : Disposable {
+internal class CourseManager internal constructor() : Disposable {
   val mapModuleVirtualFile: MutableMap<IftModule, VirtualFile> = ContainerUtil.createWeakMap()
 
   var unfoldModuleOnInit by WeakReferenceDelegator<IftModule>()
@@ -57,28 +57,20 @@ class CourseManager internal constructor() : Disposable {
 
   /**
    * @param projectWhereToOpen -- where to open projectWhereToOpen
+   * @param forceStartLesson -- force start lesson without check for passed status (passed lessons will be opened as completed text)
    */
-  fun openLesson(projectWhereToOpen: Project, lesson: Lesson?) {
+  fun openLesson(projectWhereToOpen: Project, lesson: Lesson?, forceStartLesson: Boolean = false) {
     LessonManager.instance.stopLesson()
     if (lesson == null) return //todo: remove null lessons
-    OpenLessonActivities.openLesson(projectWhereToOpen, lesson)
+    OpenLessonActivities.openLesson(projectWhereToOpen, lesson, forceStartLesson)
   }
 
-  fun findLesson(lessonName: String): Lesson? {
-    return modules
-      .flatMap { it.lessons }
-      .firstOrNull { it.name.equals(lessonName, ignoreCase = true) }
+  fun findLessonById(lessonId: String): Lesson? {
+    return lessonsForModules.firstOrNull { it.id == lessonId }
   }
 
-  fun calcLessonsForLanguage(primaryLangSupport: LangSupport): Int {
-    return ContainerUtil.concat(filterByLanguage(primaryLangSupport).map { m -> m.lessons }).size
-  }
-
-  fun calcPassedLessonsForLanguage(primaryLangSupport: LangSupport): Int {
-    return filterByLanguage(primaryLangSupport)
-      .flatMap { m -> m.lessons }
-      .filter { it.passed }
-      .size
+  fun findLessonByName(lessonName: String): Lesson? {
+    return lessonsForModules.firstOrNull { it.name.equals(lessonName, ignoreCase = true) }
   }
 
   private fun initAllModules(): List<IftModule> = COURSE_MODULES_EP.extensions

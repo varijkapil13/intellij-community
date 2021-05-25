@@ -1,13 +1,22 @@
 // Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.workspaceModel.ide
 
+import com.esotericsoftware.kryo.DefaultSerializer
+import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.Serializer
+import com.esotericsoftware.kryo.io.Input
+import com.esotericsoftware.kryo.io.Output
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ExternalProjectSystemRegistry
 import com.intellij.openapi.roots.ProjectModelExternalSource
 import com.intellij.project.isDirectoryBased
+import com.intellij.project.stateStore
 import com.intellij.workspaceModel.storage.EntitySource
+import com.intellij.workspaceModel.storage.impl.url.toVirtualFileUrl
 import com.intellij.workspaceModel.storage.url.VirtualFileUrl
 import com.intellij.workspaceModel.storage.url.VirtualFileUrlManager
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.TestOnly
 import org.jetbrains.jps.util.JpsPathUtil
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -19,19 +28,14 @@ sealed class JpsProjectConfigLocation {
     get() = baseDirectoryUrl.url
 
   abstract val baseDirectoryUrl: VirtualFileUrl
-  abstract fun exists(): Boolean
 
-  data class DirectoryBased(val projectDir: VirtualFileUrl) : JpsProjectConfigLocation() {
+  data class DirectoryBased(val projectDir: VirtualFileUrl, val ideaFolder: VirtualFileUrl) : JpsProjectConfigLocation() {
     override val baseDirectoryUrl: VirtualFileUrl
       get() = projectDir
-
-    override fun exists() = JpsPathUtil.urlToFile(projectDir.url).exists()
   }
   data class FileBased(val iprFile: VirtualFileUrl, val iprFileParent: VirtualFileUrl) : JpsProjectConfigLocation() {
     override val baseDirectoryUrl: VirtualFileUrl
       get() = iprFileParent
-
-    override fun exists() = JpsPathUtil.urlToFile(iprFile.url).exists()
   }
 }
 
@@ -53,6 +57,7 @@ sealed class JpsFileEntitySource : EntitySource {
    * Represents an xml file located in the specified [directory] which contains configuration of some entities of IntelliJ IDEA project.
    * The file name is automatically derived from the entity name.
    */
+  @DefaultSerializer(FileInDirectorySerializer::class)
   data class FileInDirectory(val directory: VirtualFileUrl, override val projectLocation: JpsProjectConfigLocation) : JpsFileEntitySource() {
     /**
      * Automatically generated value which is used to distinguish different files in [directory]. The actual name is stored in serialization
@@ -62,6 +67,15 @@ sealed class JpsFileEntitySource : EntitySource {
 
     companion object {
       private val nextId = AtomicInteger()
+
+      /**
+       * This method is temporary added for tests only
+       */
+      @ApiStatus.Internal
+      @TestOnly
+      fun resetId() {
+        nextId.set(0)
+      }
     }
 
     override val virtualFileUrl: VirtualFileUrl
@@ -74,6 +88,10 @@ sealed class JpsFileEntitySource : EntitySource {
 
     override fun hashCode(): Int {
       return directory.hashCode() * 31 * 31 + projectLocation.hashCode() * 31 + fileNameId
+    }
+
+    override fun toString(): String {
+      return "FileInDirectory(directory=$directory, fileNameId=$fileNameId, projectLocation=$projectLocation)"
     }
   }
 }
@@ -126,7 +144,8 @@ fun getJpsProjectConfigLocation(project: Project): JpsProjectConfigLocation? {
   return if (project.isDirectoryBased) {
     project.basePath?.let {
       val virtualFileUrlManager = VirtualFileUrlManager.getInstance(project)
-      JpsProjectConfigLocation.DirectoryBased(virtualFileUrlManager.fromPath(it))
+      val ideaFolder = project.stateStore.directoryStorePath!!.toVirtualFileUrl(virtualFileUrlManager)
+      JpsProjectConfigLocation.DirectoryBased(virtualFileUrlManager.fromPath(it), ideaFolder)
     }
   }
   else {
@@ -135,5 +154,18 @@ fun getJpsProjectConfigLocation(project: Project): JpsProjectConfigLocation? {
       val iprFile = virtualFileUrlManager.fromPath(it)
       JpsProjectConfigLocation.FileBased(iprFile, virtualFileUrlManager.getParentVirtualUrl(iprFile)!!)
     }
+  }
+}
+
+internal class FileInDirectorySerializer : Serializer<JpsFileEntitySource.FileInDirectory>(false, true) {
+  override fun write(kryo: Kryo, output: Output, o: JpsFileEntitySource.FileInDirectory) {
+    kryo.writeClassAndObject(output, o.directory)
+    kryo.writeClassAndObject(output, o.projectLocation)
+  }
+
+  override fun read(kryo: Kryo, input: Input, type: Class<JpsFileEntitySource.FileInDirectory>): JpsFileEntitySource.FileInDirectory {
+    val fileUrl = kryo.readClassAndObject(input) as VirtualFileUrl
+    val location = kryo.readClassAndObject(input) as JpsProjectConfigLocation
+    return JpsFileEntitySource.FileInDirectory(fileUrl, location)
   }
 }

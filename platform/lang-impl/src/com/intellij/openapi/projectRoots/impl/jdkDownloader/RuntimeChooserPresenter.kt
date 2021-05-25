@@ -54,17 +54,16 @@ class RuntimeChooserPresenter: ColoredListCellRenderer<RuntimeChooserItem>() {
       return
     }
 
-    if (value is RuntimeChooserCustomItem) {
-      append(LangBundle.message("dialog.item.choose.ide.runtime.custom", value.version), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES,
-             true)
+    if (value is RuntimeChooserItemWithFixedLocation) {
+      presetRuntime(value)
       return
     }
   }
 
   companion object {
-    fun SimpleColoredComponent.presetCurrentRuntime(value: RuntimeChooserCurrentItem) {
+    fun SimpleColoredComponent.presetRuntime(value: RuntimeChooserItemWithFixedLocation) {
       value.version?.let {
-        append(it, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES, true)
+        append(it, SimpleTextAttributes.REGULAR_ATTRIBUTES, true)
         append(" ")
       }
 
@@ -75,7 +74,12 @@ class RuntimeChooserPresenter: ColoredListCellRenderer<RuntimeChooserItem>() {
 
       if (value.version == null && value.displayName == null) {
         append(LangBundle.message("dialog.item.choose.ide.runtime.unknown"))
+        append(" ")
       }
+    }
+
+    fun SimpleColoredComponent.presetCurrentRuntime(value: RuntimeChooserCurrentItem) {
+      presetRuntime(value)
 
       if (value.isBundled) {
         append(LangBundle.message("dialog.item.choose.ide.runtime.bundled"), SimpleTextAttributes.GRAY_SMALL_ATTRIBUTES)
@@ -85,7 +89,7 @@ class RuntimeChooserPresenter: ColoredListCellRenderer<RuntimeChooserItem>() {
     fun SimpleColoredComponent.presentJbrItem(value: RuntimeChooserDownloadableItem) {
       val item = value.item
 
-      append(item.jdkVersion, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES, true)
+      append(item.jdkVersion, SimpleTextAttributes.REGULAR_ATTRIBUTES, true)
       append(" ")
 
       item.product.vendor.let {

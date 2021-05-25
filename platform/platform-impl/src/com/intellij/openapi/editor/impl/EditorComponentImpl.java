@@ -181,7 +181,7 @@ public class EditorComponentImpl extends JTextComponent implements Scrollable, D
     super.setCursor(cursor);
     myEditor.myCursorSetExternally = true;
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Mouse cursor set to " + cursor, new Throwable());
+      LOG.debug("Mouse cursor set to " + cursor + " in " + myEditor, new Throwable());
     }
   }
 
@@ -247,7 +247,7 @@ public class EditorComponentImpl extends JTextComponent implements Scrollable, D
     else {
       UISettings.setupAntialiasing(gg);
     }
-    gg.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, myEditor.myFractionalMetricsHintValue);
+    gg.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, UISettings.getEditorFractionalMetricsHint());
     AffineTransform origTx = PaintUtil.alignTxToInt(gg, PaintUtil.insets2offset(getInsets()), true, false, RoundingMode.FLOOR);
     myEditor.paint(gg);
     if (origTx != null) gg.setTransform(origTx);
@@ -387,8 +387,7 @@ public class EditorComponentImpl extends JTextComponent implements Scrollable, D
     setUI(new EditorAccessibilityTextUI());
     UISettings.setupEditorAntialiasing(this);
     // myEditor is null when updateUI() is called from parent's constructor
-    putClientProperty(RenderingHints.KEY_FRACTIONALMETRICS, myEditor == null ? EditorImpl.calcFractionalMetricsHint()
-                                                                             : myEditor.myFractionalMetricsHintValue);
+    putClientProperty(RenderingHints.KEY_FRACTIONALMETRICS, UISettings.getEditorFractionalMetricsHint());
     invalidate();
   }
 

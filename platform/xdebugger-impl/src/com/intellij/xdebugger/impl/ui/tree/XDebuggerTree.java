@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.xdebugger.impl.ui.tree;
 
 import com.intellij.execution.configurations.RemoteRunProfile;
@@ -9,6 +9,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.changes.issueLinks.TreeLinkMouseListener;
@@ -290,6 +291,11 @@ public class XDebuggerTree extends DnDAwareTree implements DataProvider, Disposa
     myListeners.add(listener);
   }
 
+  public void addTreeListener(@NotNull XDebuggerTreeListener listener, @NotNull Disposable parentDisposable) {
+    addTreeListener(listener);
+    Disposer.register(parentDisposable, () -> removeTreeListener(listener));
+  }
+
   public void removeTreeListener(@NotNull XDebuggerTreeListener listener) {
     myListeners.remove(listener);
   }
@@ -405,6 +411,7 @@ public class XDebuggerTree extends DnDAwareTree implements DataProvider, Disposa
     DebuggerUIUtil.registerActionOnComponent(XDebuggerActions.JUMP_TO_SOURCE, this, this);
     DebuggerUIUtil.registerActionOnComponent(XDebuggerActions.JUMP_TO_TYPE_SOURCE, this, this);
     DebuggerUIUtil.registerActionOnComponent(XDebuggerActions.MARK_OBJECT, this, this);
+    DebuggerUIUtil.registerActionOnComponent(XDebuggerActions.EVALUATE_EXPRESSION, this, this);
   }
 
   private static void markNodesObsolete(final XValueContainerNode<?> node) {

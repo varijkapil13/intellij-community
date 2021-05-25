@@ -45,6 +45,9 @@ abstract class TaskContext : LearningDslBase {
     }
   }
 
+  /** Restore when timer is out. Is needed for chained tasks. */
+  open fun restoreByTimer(delayMillis: Int = 2000, restoreId: TaskId? = null) = Unit
+
   data class RestoreNotification(@Nls val message: String,
                                  @Nls val restoreLinkText: String = LearnBundle.message("learn.restore.default.link.text"),
                                  val callback: () -> Unit)
@@ -206,7 +209,7 @@ abstract class TaskContext : LearningDslBase {
     caret(line, column)
   }
 
-  class DoneStepContext(val future: CompletableFuture<Boolean>, rt: TaskRuntimeContext) : TaskRuntimeContext(rt) {
+  class DoneStepContext(private val future: CompletableFuture<Boolean>, rt: TaskRuntimeContext) : TaskRuntimeContext(rt) {
     fun completeStep() {
       ApplicationManager.getApplication().assertIsDispatchThread()
       if (!future.isDone && !future.isCancelled) {

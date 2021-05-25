@@ -1,0 +1,11 @@
+<html>
+<body>Reports redundant <code>requireNotNull</code> or <code>checkNotNull</code> call:
+
+<pre>
+fun foo(i: Int) {
+  requireNotNull(i) // This 'i' is always not null, so this 'requireNotNull' call is redundant.
+}
+</pre>
+
+</body>
+</html>

@@ -819,7 +819,7 @@ public class AllIcons {
     /** 16x16 */ public static final @NotNull Icon RwAccess = load("nodes/rw-access.svg", 8818188491374306539L, 0);
     /** 16x16 */ public static final @Deprecated @NotNull Icon Rw_access = RwAccess;
     /** 16x16 */ public static final @NotNull Icon SecurityRole = load("nodes/securityRole.svg", 5082337008998625713L, 0);
-    /** 14x12 */ public static final @NotNull Icon Services = load("nodes/services.svg", 1561762227763275835L, 0);
+    /** 16x16 */ public static final @NotNull Icon Services = load("nodes/services.svg", 8097211861669917624L, 0);
     /** 16x16 */ public static final @NotNull Icon Servlet = load("nodes/servlet.svg", -6128611108168249665L, 0);
     /** 16x16 */ public static final @NotNull Icon Shared = load("nodes/shared.svg", -7063885122602748787L, 0);
     /** 16x16 */ public static final @NotNull Icon SortBySeverity = load("nodes/sortBySeverity.svg", -8804133536678760239L, 2);
@@ -847,18 +847,6 @@ public class AllIcons {
     /** 16x16 */ public static final @NotNull Icon WebFolder = load("nodes/webFolder.svg", 2222154280104242723L, 0);
     /** 16x16 */ public static final @NotNull Icon Weblistener = load("nodes/weblistener.svg", -7166837522849889039L, 0);
     /** 16x16 */ public static final @NotNull Icon WriteAccess = load("nodes/write-access.svg", 5767645715036234832L, 0);
-
-    /** @deprecated to be removed in IDEA 2021.1 - use AllIcons.General.ArrowDown */
-    @SuppressWarnings("unused")
-    @Deprecated
-    @ScheduledForRemoval(inVersion = "2021.1")
-    public static final @NotNull Icon TreeDownArrow = load("nodes/treeDownArrow.png", 0L, 0);
-
-    /** @deprecated to be removed in IDEA 2021.1 - use AllIcons.General.ArrowRight */
-    @SuppressWarnings("unused")
-    @Deprecated
-    @ScheduledForRemoval(inVersion = "2021.1")
-    public static final @NotNull Icon TreeRightArrow = load("nodes/treeRightArrow.png", 0L, 0);
   }
 
   public static final class ObjectBrowser {
@@ -953,7 +941,7 @@ public class AllIcons {
     /** 16x16 */ public static final @NotNull Icon BigQuery = load("providers/bigQuery.svg", -1485203038192915431L, 0);
     /** 16x16 */ public static final @NotNull Icon Cassandra = load("providers/cassandra.svg", -7281058075200040514L, 2);
     /** 16x16 */ public static final @NotNull Icon ClickHouse = load("providers/clickHouse.svg", 1647149862900553939L, 0);
-    /** 16x16 */ public static final @NotNull Icon CockroachDB = load("providers/cockroachDB.svg", -840155423285507372L, 7);
+    /** 16x16 */ public static final @NotNull Icon CockroachDB = load("providers/cockroachDB.svg", -8622465395810973373L, 0);
     /** 16x16 */ public static final @NotNull Icon Couchbase = load("providers/couchbase.svg", 2362485358505666920L, 0);
     /** 16x16 */ public static final @NotNull Icon DB2 = load("providers/DB2.svg", 6413560575348587225L, 2);
     /** 16x16 */ public static final @NotNull Icon Eclipse = load("providers/eclipse.svg", 8001776984939118232L, 2);
@@ -980,14 +968,14 @@ public class AllIcons {
     /** 16x16 */ public static final @NotNull Icon Postgresql = load("providers/postgresql.svg", 8942378240461502503L, 2);
     /** 16x16 */ public static final @NotNull Icon Presto = load("providers/presto.svg", 4677484317865724648L, 2);
     /** 16x16 */ public static final @NotNull Icon Redshift = load("providers/redshift.svg", -8161636076303129150L, 0);
-    /** 16x16 */ public static final @NotNull Icon Singlestore = load("providers/singlestore.svg", -4763079360495849532L, 0);
+    /** 16x16 */ public static final @NotNull Icon Singlestore = load("providers/singlestore.svg", -1596894298598251989L, 0);
     /** 16x16 */ public static final @NotNull Icon Snowflake = load("providers/snowflake.svg", -511196148296774621L, 0);
     /** 16x16 */ public static final @NotNull Icon Spark = load("providers/spark.svg", 529641334744352380L, 0);
     /** 16x16 */ public static final @NotNull Icon Sqlite = load("providers/sqlite.svg", -1354077436800259360L, 2);
     /** 16x16 */ public static final @NotNull Icon SqlServer = load("providers/sqlServer.svg", 2557052360809110194L, 2);
     /** 16x16 */ public static final @NotNull Icon Sun = load("providers/sun.svg", 901999003933198963L, 2);
     /** 16x16 */ public static final @NotNull Icon Sybase = load("providers/sybase.svg", 469976759404647468L, 0);
-    /** 16x16 */ public static final @NotNull Icon Tarantool = load("providers/tarantool.svg", 2749575921763625124L, 0);
+    /** 16x16 */ public static final @NotNull Icon Tarantool = load("providers/tarantool.svg", 1397980433223516839L, 0);
     /** 16x16 */ public static final @NotNull Icon Teradata = load("providers/teradata.svg", -1965526284412460845L, 0);
     /** 16x16 */ public static final @NotNull Icon Tibero = load("providers/tibero.svg", 3743642978823178398L, 2);
     /** 16x16 */ public static final @NotNull Icon Trino = load("providers/trino.svg", 6102370661544681716L, 2);
@@ -1079,6 +1067,8 @@ public class AllIcons {
     /** 13x13 */ public static final @NotNull Icon NoEvents = load("toolwindows/noEvents.svg", 5097176169930710668L, 2);
     /** 13x13 */ public static final @NotNull Icon Problems = load("toolwindows/problems.svg", -3654404648954575086L, 2);
     /** 13x13 */ public static final @NotNull Icon ProblemsEmpty = load("toolwindows/problemsEmpty.svg", -4152233369359930308L, 2);
+    /** 16x16 */ public static final @NotNull Icon ProjectWideAnalysisOff = load("toolwindows/projectWideAnalysisOff.svg", -6863056163174444636L, 2);
+    /** 16x16 */ public static final @NotNull Icon ProjectWideAnalysisOn = load("toolwindows/projectWideAnalysisOn.svg", 4864149562935994868L, 2);
     /** 13x13 */ public static final @NotNull Icon ToolWindowAnalyzeDataflow = load("toolwindows/toolWindowAnalyzeDataflow.svg", 1296641742748522434L, 2);
     /** 13x13 */ public static final @NotNull Icon ToolWindowAnt = load("toolwindows/toolWindowAnt.svg", -8044985201571763562L, 2);
     /** 13x13 */ public static final @NotNull Icon ToolWindowBuild = load("toolwindows/toolWindowBuild.svg", -5921532073527085775L, 2);

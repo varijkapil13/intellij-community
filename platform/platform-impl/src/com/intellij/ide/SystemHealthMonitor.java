@@ -13,7 +13,6 @@ import com.intellij.idea.StartupUtil;
 import com.intellij.jna.JnaLoader;
 import com.intellij.notification.*;
 import com.intellij.notification.impl.NotificationFullContent;
-import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.*;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
@@ -31,6 +30,8 @@ import com.intellij.util.lang.JavaVersion;
 import com.intellij.util.system.CpuArch;
 import com.intellij.util.ui.IoErrorText;
 import com.sun.jna.*;
+import com.sun.jna.platform.mac.SystemB;
+import com.sun.jna.ptr.IntByReference;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.PropertyKey;
@@ -101,6 +102,16 @@ final class SystemHealthMonitor extends PreloadingActivity {
   }
 
   private static void checkRuntime() {
+    if (isUnderRosetta()) {
+      NotificationAction downloadAction =
+        NotificationAction.createSimpleExpiring(
+          IdeBundle.message("bundled.jre.m1.arch.message.download"), () -> {
+            BrowserUtil.browse("https://www.jetbrains.com/products/#type=ide");
+          });
+      showNotification("bundled.jre.m1.arch.message", downloadAction,
+                       ApplicationNamesInfo.getInstance().getFullProductName());
+    }
+
     String jreHome = SystemProperties.getJavaHome();
     if (!(PathManager.isUnderHomeDirectory(jreHome) || isModernJBR())) {
       // the JRE is non-bundled and is either non-JB or older than bundled
@@ -154,13 +165,34 @@ final class SystemHealthMonitor extends PreloadingActivity {
     return false;
   }
 
+  private static boolean isUnderRosetta() {
+    // Use "sysctl.proc_translated" to check if running in Rosetta
+    // See https://developer.apple.com/documentation/apple-silicon/about-the-rosetta-translation-environment#Determine-Whether-Your-App-Is-Running-as-a-Translated-Binary
+    // for more details
+
+    if (!SystemInfo.isMac || !CpuArch.isIntel64()) {
+      return false;
+    }
+
+    IntByReference size = new IntByReference(SystemB.INT_SIZE);
+    Pointer p = new Memory(size.getValue());
+
+    if (SystemB.INSTANCE.sysctlbyname(
+      "sysctl.proc_translated", p, size, null, 0) != -1)
+    {
+      return p.getInt(0) == 1;
+    }
+
+    return false;
+  }
+
   private static void checkReservedCodeCacheSize() {
     int reservedCodeCacheSize = VMOptions.readOption(VMOptions.MemoryKind.CODE_CACHE, true);
     int minReservedCodeCacheSize = 240;  //todo[r.sh] PluginManagerCore.isRunningFromSources() ? 240 : CpuArch.is32Bit() ? 384 : 512;
     if (reservedCodeCacheSize > 0 && reservedCodeCacheSize < minReservedCodeCacheSize) {
       EditCustomVmOptionsAction vmEditAction = new EditCustomVmOptionsAction();
       NotificationAction action = vmEditAction.isEnabled() ? NotificationAction.createExpiring(
-        IdeBundle.message("vm.options.edit.action.cap"), (e, n) -> ActionUtil.performActionDumbAware(vmEditAction, e)) : null;
+        IdeBundle.message("vm.options.edit.action.cap"), (e, n) -> vmEditAction.actionPerformed(e)) : null;
       showNotification("code.cache.warn.message", action, reservedCodeCacheSize, minReservedCodeCacheSize);
     }
   }
@@ -188,7 +220,7 @@ final class SystemHealthMonitor extends PreloadingActivity {
   }
 
   private static void checkSignalBlocking() {
-    if (SystemInfo.isUnix & JnaLoader.isLoaded()) {
+    if (SystemInfo.isUnix && JnaLoader.isLoaded()) {
       try {
         Memory sa = new Memory(256);
         LibC libC = Native.load("c", LibC.class);
@@ -298,7 +330,7 @@ final class SystemHealthMonitor extends PreloadingActivity {
                 }
                 else {
                   NotificationGroupManager.getInstance().getNotificationGroup(DISPLAY_ID)
-                    .createNotification(message, file.getPath(), NotificationType.ERROR, null)
+                    .createNotification(message, file.getPath(), NotificationType.ERROR)
                     .whenExpired(() -> {
                       reported.compareAndSet(true, false);
                       restart(timeout);

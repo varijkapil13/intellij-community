@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.navigationToolbar
 
 import com.intellij.ide.structureView.StructureViewModel
@@ -21,9 +21,7 @@ import com.intellij.util.Processor
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.annotations.Nullable
 
-/**
- * @author yole
- */
+
 abstract class StructureAwareNavBarModelExtension : AbstractNavBarModelExtension() {
   protected abstract val language: Language
   private var currentFile: SoftReference<PsiFile>? = null
@@ -34,7 +32,7 @@ abstract class StructureAwareNavBarModelExtension : AbstractNavBarModelExtension
     if (UISettings.instance.showMembersInNavigationBar) {
       val psiFile = CommonDataKeys.PSI_FILE.getData(dataContext)
       val editor = CommonDataKeys.EDITOR.getData(dataContext)
-      if (psiFile == null || editor == null) return null
+      if (psiFile == null || !psiFile.isValid || editor == null) return null
       val psiElement = psiFile.findElementAt(editor.caretModel.offset)
       if (isAcceptableLanguage(psiElement)) {
         buildStructureViewModel(psiFile, editor)?.let { model ->

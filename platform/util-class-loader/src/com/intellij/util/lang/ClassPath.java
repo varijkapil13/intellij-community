@@ -44,6 +44,7 @@ public final class ClassPath {
 
   private final List<Path> files;
   private final @Nullable ResourceFileFactory resourceFileFactory;
+  final boolean mimicJarUrlConnection;
   private final List<Loader> loaders = new ArrayList<>();
 
   private volatile boolean allUrlsWereProcessed;
@@ -56,7 +57,6 @@ public final class ClassPath {
   // true implies that the .jar file will not be modified in the lifetime of the JarLoader
   final boolean lockJars;
   private final boolean useCache;
-  final boolean preloadJarContents;
   final boolean isClassPathIndexEnabled;
   private final @Nullable CachePoolImpl cachePool;
   private final @Nullable Predicate<? super Path> cachingCondition;
@@ -94,15 +94,16 @@ public final class ClassPath {
             @NotNull Set<Path> filesWithProtectionDomain,
             @NotNull UrlClassLoader.Builder configuration,
             @Nullable ResourceFileFactory resourceFileFactory,
-            @NotNull ClassPath.ClassDataConsumer classDataConsumer) {
+            @NotNull ClassPath.ClassDataConsumer classDataConsumer,
+            boolean mimicJarUrlConnection) {
     lockJars = configuration.lockJars;
     useCache = configuration.useCache;
-    preloadJarContents = configuration.preloadJarContents;
     cachePool = configuration.cachePool;
     cachingCondition = configuration.cachingCondition;
     isClassPathIndexEnabled = configuration.isClassPathIndexEnabled;
     errorOnMissingJar = configuration.errorOnMissingJar;
     this.filesWithProtectionDomain = filesWithProtectionDomain;
+    this.mimicJarUrlConnection = mimicJarUrlConnection;
 
     this.classDataConsumer = recordLoadingTime ? new MeasuringClassDataConsumer(classDataConsumer) : classDataConsumer;
 
@@ -385,7 +386,7 @@ public final class ClassPath {
     else {
       ResourceFile zipFile;
       if (resourceFileFactory == null) {
-        zipFile = new JdkZipResourceFile(file, lockJars, preloadJarContents, false);
+        zipFile = new JdkZipResourceFile(file, lockJars, false);
       }
       else {
         zipFile = resourceFileFactory.create(file);
